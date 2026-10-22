@@ -50,7 +50,7 @@ jobs:
           curl --fail --location --silent --show-error --max-time 30 https://www.jeaxlabs.com.br/logo-full.png -o android-source/app/src/main/res/drawable-nodpi/jeaxlabs_logo.png || echo 'Logo download failed; continuing because the current shell does not require it.'
       - name: Compile CI APK
         working-directory: android-source
-        run: gradle --no-daemon test assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Package CI APK, source, and tools
         shell: bash
         run: |

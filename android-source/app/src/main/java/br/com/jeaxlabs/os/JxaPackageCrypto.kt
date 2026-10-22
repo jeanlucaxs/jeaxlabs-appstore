@@ -1,6 +1,7 @@
 package br.com.jeaxlabs.os
 
 import android.content.Context
+import android.os.Build
 import android.util.Base64
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -29,7 +30,12 @@ import javax.crypto.spec.SecretKeySpec
 data class VerifiedJxaPackage(
     val apkFile: File,
     val appName: String,
-    val version: String
+    val version: String,
+    val packageFormat: String = "JXA",
+    val targetPackage: String? = null,
+    val versionCode: Long = 0L,
+    val minimumVersion: String = "",
+    val releaseNotes: String = ""
 )
 
 object JxaPackageCrypto {
@@ -44,7 +50,8 @@ object JxaPackageCrypto {
         context: Context,
         packageUrl: String,
         packagePassword: String,
-        trustedFingerprint: String
+        trustedFingerprint: String,
+        expectedFormat: String = "JXA"
     ): VerifiedJxaPackage {
         require(packageUrl.startsWith("https://", true)) {
             "A URL do pacote precisa usar HTTPS."
@@ -64,7 +71,7 @@ object JxaPackageCrypto {
         val packageFile = File.createTempFile("jeax_jxa_", ".jxa", context.cacheDir)
         try {
             downloadHttps(packageUrl.trim(), packageFile)
-            return decryptPackage(context, packageFile, packagePassword, normalizedFingerprint)
+            return decryptPackage(context, packageFile, packagePassword, normalizedFingerprint, expectedFormat)
         } finally {
             packageFile.delete()
         }
@@ -105,8 +112,13 @@ object JxaPackageCrypto {
         context: Context,
         packageFile: File,
         packagePassword: String,
-        trustedFingerprint: String
+        trustedFingerprint: String,
+        expectedFormat: String
     ): VerifiedJxaPackage {
+        val normalizedFormat = expectedFormat.trim().uppercase(Locale.ROOT)
+        require(normalizedFormat == "JXA" || normalizedFormat == "JXU") {
+            "Formato interno de pacote não suportado."
+        }
         val manifestFile = readPackageEntries(context, packageFile)
         var apkFile: File? = null
         try {
@@ -121,8 +133,8 @@ object JxaPackageCrypto {
 
             val manifestText = String(manifestBytes, StandardCharsets.UTF_8)
             val manifest = JSONObject(manifestText)
-            require(manifest.optString("format") == "JXA") {
-                "O arquivo não é um pacote JeaxLabs .jxa."
+            require(manifest.optString("format") == normalizedFormat) {
+                "O arquivo não corresponde ao formato .$normalizedFormat solicitado."
             }
             require(manifest.optInt("format_version", -1) == FORMAT_VERSION) {
                 "A versão do formato .jxa não é compatível."
@@ -163,13 +175,48 @@ object JxaPackageCrypto {
                 "O tamanho do conteúdo não corresponde ao manifesto."
             }
 
-            val appName = manifest.optString("name").trim()
             val version = manifest.optString("version").trim()
-            require(appName.isNotEmpty() && version.isNotEmpty()) {
-                "O manifesto não informa o nome e a versão do aplicativo."
+            val appName = if (normalizedFormat == "JXA") {
+                manifest.optString("name").trim()
+            } else {
+                manifest.optString("product").trim()
             }
+            require(appName.isNotEmpty() && version.isNotEmpty()) {
+                "O manifesto não informa o nome e a versão do pacote."
+            }
+
+            var targetPackage: String? = null
+            var declaredVersionCode = 0L
+            var minimumVersion = ""
+            var releaseNotes = ""
+            if (normalizedFormat == "JXU") {
+                require(manifest.optString("package_type") == "system-update") {
+                    "O pacote .jxu não é uma atualização do sistema."
+                }
+                targetPackage = manifest.optString("target_package").trim()
+                require(targetPackage == context.packageName) {
+                    "Esta atualização não é destinada a este aplicativo."
+                }
+                minimumVersion = manifest.optString("minimum_version").trim()
+                require(isValidVersion(minimumVersion)) {
+                    "A versão mínima exigida no .jxu é inválida."
+                }
+                declaredVersionCode = manifest.optLong("version_code", -1L)
+                require(declaredVersionCode > 0L) {
+                    "O .jxu não informa um versionCode Android válido."
+                }
+                releaseNotes = manifest.optString("release_notes", "")
+                require(manifest.optString("source_filename").endsWith(".apk", true)) {
+                    "A carga de uma atualização do sistema precisa ser um APK."
+                }
+            }
+
             val aad = manifest.optString("aad_utf8")
-            val expectedAad = "JeaxLabs-JXA-v1|$appName|$version"
+            val expectedAad = if (normalizedFormat == "JXA") {
+                "JeaxLabs-JXA-v1|$appName|$version"
+            } else {
+                "JeaxLabs-JXU-v1|$version|$minimumVersion"
+            }
             require(aad == expectedAad) {
                 "Os dados autenticados do pacote não correspondem ao manifesto."
             }
@@ -214,7 +261,26 @@ object JxaPackageCrypto {
                         output.fd.sync()
                     }
                 }
-                validateApk(apkFile)
+                val installedApkInfo = validateApk(context, apkFile)
+                if (normalizedFormat == "JXU") {
+                    val parsedName = installedApkInfo.versionName ?: ""
+                    val parsedCode = if (Build.VERSION.SDK_INT >= 28) installedApkInfo.longVersionCode else installedApkInfo.versionCode.toLong()
+                    require(installedApkInfo.packageName == targetPackage) {
+                        "O APK interno não atualiza o pacote JeaxLabs OS esperado."
+                    }
+                    require(parsedName == version && parsedCode == declaredVersionCode) {
+                        "A versão do manifesto .jxu não corresponde à versão real do APK."
+                    }
+                    val current = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val currentName = current.versionName ?: "0.0.0"
+                    val currentCode = if (Build.VERSION.SDK_INT >= 28) current.longVersionCode else current.versionCode.toLong()
+                    require(compareVersions(currentName, minimumVersion) >= 0) {
+                        "Esta atualização exige JeaxLabs OS $minimumVersion ou superior."
+                    }
+                    require(parsedCode > currentCode) {
+                        "O .jxu não é uma versão mais nova que a versão instalada."
+                    }
+                }
             } catch (error: Exception) {
                 apkFile.delete()
                 throw if (error is IllegalArgumentException || error is SecurityException) error
@@ -223,7 +289,16 @@ object JxaPackageCrypto {
                 key.fill(0)
             }
 
-            val result = VerifiedJxaPackage(apkFile, appName, version)
+            val result = VerifiedJxaPackage(
+                apkFile = apkFile,
+                appName = appName,
+                version = version,
+                packageFormat = normalizedFormat,
+                targetPackage = targetPackage,
+                versionCode = declaredVersionCode,
+                minimumVersion = minimumVersion,
+                releaseNotes = releaseNotes
+            )
             apkFile = null
             return result
         } finally {
@@ -332,7 +407,7 @@ object JxaPackageCrypto {
         }
     }
 
-    private fun validateApk(file: File) {
+    private fun validateApk(context: Context, file: File): android.content.pm.PackageInfo {
         require(file.isFile && file.length() > 0L) {
             "O conteúdo descriptografado não é um APK válido."
         }
@@ -341,6 +416,23 @@ object JxaPackageCrypto {
                 "O arquivo descriptografado não contém AndroidManifest.xml."
             }
         }
+        return context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            ?: throw IllegalArgumentException("Android não reconheceu o conteúdo como APK instalável.")
+    }
+
+    private fun isValidVersion(value: String): Boolean =
+        Regex("^\\\\d+\\\\.\\\\d+\\\\.\\\\d+$").matches(value)
+
+    private fun compareVersions(left: String, right: String): Int {
+        val a = left.split(".").map { it.toIntOrNull() ?: 0 }
+        val b = right.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until 3) {
+            val av = a.getOrElse(i) { 0 }
+            val bv = b.getOrElse(i) { 0 }
+            if (av > bv) return 1
+            if (av < bv) return -1
+        }
+        return 0
     }
 
     private fun sha256File(file: File): String {

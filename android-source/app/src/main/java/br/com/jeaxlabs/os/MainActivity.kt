@@ -7,6 +7,7 @@ import android.app.DownloadManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.media.AudioManager
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.app.admin.DevicePolicyManager
@@ -18,11 +19,20 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.net.wifi.WifiConfiguration
+import android.net.wifi.WifiManager
+import android.net.wifi.WifiNetworkSpecifier
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.ConnectivityManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Environment
+import android.os.StatFs
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -65,6 +75,9 @@ class MainActivity : Activity() {
     private var activePage = "home"
     private var cachedApps: List<ResolveInfo> = emptyList()
     private var kioskStartPending = false
+    private var screenReceiverRegistered = false
+    private var screenOffPending = false
+    private var wifiRequestCallback: ConnectivityManager.NetworkCallback? = null
     private var discoveredBluetoothDevices = linkedMapOf<String, BluetoothDevice>()
     private var bluetoothReceiverRegistered = false
     private val bluetoothReceiver = object : BroadcastReceiver() {
@@ -96,6 +109,28 @@ class MainActivity : Activity() {
 
     private val dpm by lazy { getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager }
     private val adminComponent by lazy { ComponentName(this, JeaxDeviceAdminReceiver::class.java) }
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenOffPending = true
+                    sessionUnlocked = false
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    if (screenOffPending) {
+                        screenOffPending = false
+                        handler.post {
+                            if (prefs.getBoolean("setup_done", false) && activePage !in setOf("startup", "welcome", "setup")) showLockScreen()
+                            if (dpm.isDeviceOwnerApp(packageName)) {
+                                ensureManagedSystemMode()
+                                if (!isSystemLockTaskActive()) startManagedLockTask()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +139,7 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        registerScreenReceiver()
         cachedApps = loadLaunchableApps()
         checkForUpdatesIfDue()
         showStartup()
@@ -111,17 +147,90 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        applySystemUiMode()
         if (activePage == "bluetooth") {
             registerBluetoothReceiver()
             handler.post { if (activePage == "bluetooth") showBluetoothPage() }
         }
-        if (appReady && prefs.getBoolean("kiosk_enabled", false) && dpm.isDeviceOwnerApp(packageName)) {
-            handler.postDelayed({
-                if (appReady && prefs.getBoolean("kiosk_enabled", false) && !isSystemLockTaskActive()) {
-                    showKioskScreen()
-                    startManagedLockTask()
-                }
-            }, 250)
+        if (appReady && dpm.isDeviceOwnerApp(packageName)) {
+            ensureManagedSystemMode()
+            if (!isSystemLockTaskActive()) handler.postDelayed({ startManagedLockTask() }, 180)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applySystemUiMode()
+    }
+
+    override fun onDestroy() {
+        unregisterBluetoothReceiver()
+        if (screenReceiverRegistered) {
+            try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+            screenReceiverRegistered = false
+        }
+        val callback = wifiRequestCallback
+        if (callback != null) {
+            try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(callback) } catch (_: Exception) {}
+            wifiRequestCallback = null
+        }
+        super.onDestroy()
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_EXPORTED)
+            else {
+                @Suppress("DEPRECATION")
+                registerReceiver(screenReceiver, filter)
+            }
+            screenReceiverRegistered = true
+        } catch (_: Exception) {}
+    }
+
+    private fun applySystemUiMode() {
+        if (dpm.isDeviceOwnerApp(packageName) && prefs.getBoolean("kiosk_enabled", false)) {
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        } else {
+            window.statusBarColor = background
+            window.navigationBarColor = background
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+    }
+
+    private fun ensureManagedSystemMode(): Boolean {
+        if (!dpm.isDeviceOwnerApp(packageName)) return false
+        prefs.edit().putBoolean("kiosk_enabled", true).apply()
+        return try {
+            dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
+            if (Build.VERSION.SDK_INT >= 28) dpm.setLockTaskFeatures(adminComponent, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
+            else dpm.setLockTaskFeatures(adminComponent, 0)
+            val keyguardDisabled = dpm.setKeyguardDisabled(adminComponent, true)
+            dpm.setStatusBarDisabled(adminComponent, true)
+            dpm.setUninstallBlocked(adminComponent, packageName, true)
+            val homeFilter = IntentFilter(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+            }
+            dpm.addPersistentPreferredActivity(adminComponent, homeFilter, ComponentName(this, MainActivity::class.java))
+            prefs.edit().putBoolean("jeax_keyguard_disabled", keyguardDisabled).apply()
+            applySystemUiMode()
+            true
+        } catch (e: Exception) {
+            prefs.edit().putString("managed_mode_error", e.message ?: "Falha ao aplicar política").apply()
+            applySystemUiMode()
+            false
         }
     }
 
@@ -160,16 +269,10 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-        if (prefs.getBoolean("kiosk_enabled", false)) {
-            showPinDialog("Desbloquear JeaxLabs Task Locker") {
-                stopKiosk()
-            }
-            return
-        }
         when (activePage) {
-            "home" -> { }
-            "lockscreen", "startup" -> { }
+            "home", "lockscreen", "startup" -> { }
             "welcome" -> showWelcome()
+            "setup" -> showWelcome()
             else -> showHome()
         }
     }
@@ -341,6 +444,10 @@ class MainActivity : Activity() {
     }
 
     private fun setBars(darkSurface: Boolean) {
+        if (dpm.isDeviceOwnerApp(packageName) && prefs.getBoolean("kiosk_enabled", false)) {
+            applySystemUiMode()
+            return
+        }
         if (darkSurface) {
             window.statusBarColor = Color.rgb(49, 39, 94)
             window.navigationBarColor = Color.rgb(38, 31, 69)
@@ -400,16 +507,11 @@ class MainActivity : Activity() {
         setContentView(root)
         handler.postDelayed({
             appReady = true
-            if (prefs.getBoolean("kiosk_enabled", false) && dpm.isDeviceOwnerApp(packageName)) {
-                showKioskScreen()
-                startManagedLockTask()
-            } else if (prefs.getBoolean("setup_done", false) && !sessionUnlocked) {
-                showLockScreen()
-            } else if (prefs.getBoolean("setup_done", false)) {
-                showHome()
-            } else {
-                showWelcome()
+            if (dpm.isDeviceOwnerApp(packageName)) {
+                ensureManagedSystemMode()
+                if (!isSystemLockTaskActive()) startManagedLockTask()
             }
+            if (prefs.getBoolean("setup_done", false)) showLockScreen() else showWelcome()
         }, 900)
     }
 
@@ -431,11 +533,15 @@ class MainActivity : Activity() {
         root.addView(label("Conheça o JeaxLabs OS: uma interface feita para reunir seus aplicativos, controles e ferramentas em um só lugar.", 16f, Color.rgb(236, 230, 255)))
         root.addView(space(28))
         root.addView(button("Começar configuração  →", { showSetup() }, Color.WHITE, purpleDark, 58, 20))
-        root.addView(label("JeaxLabs OS  •  versão 1.3.0", 12f, Color.rgb(222, 213, 248)).apply {
+        root.addView(label("JeaxLabs OS  •  versão 1.4.0", 12f, Color.rgb(222, 213, 248)).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         })
         setContentView(root)
+        if (!prefs.getBoolean("first_boot_permissions_requested", false)) {
+            prefs.edit().putBoolean("first_boot_permissions_requested", true).apply()
+            handler.postDelayed({ if (activePage == "welcome") requestInitialPermissions() }, 450)
+        }
     }
 
     private fun showSetup() {
@@ -446,36 +552,36 @@ class MainActivity : Activity() {
         body.addView(brandMark(48))
         body.addView(space(20))
         body.addView(label("Vamos preparar\ntudo para você.", 30f, ink, true))
-        body.addView(label("Esta etapa é rápida. Você pode ajustar cada item novamente depois.", 14f, muted))
-        body.addView(space(20))
-        body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede", { openPanelOrSettings(Settings.Panel.ACTION_WIFI, Settings.ACTION_WIFI_SETTINGS) }))
-        body.addView(rowButton("◐", "Tela e aparência", "Brilho, tamanho e rotação da tela", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
-        body.addView(rowButton("♢", "Notificações", "Ative o acesso para exibi-las no JeaxLabs OS", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
-        body.addView(rowButton("⌂", "Tela inicial padrão", "Selecione o JeaxLabs OS como launcher", { openSettings(Settings.ACTION_HOME_SETTINGS) }))
-        body.addView(space(8))
-        body.addView(button("Finalizar configuração", {
+        body.addView(label("O modo completo entra em vigor depois que o PC provisionar o JeaxLabs OS como Device Owner. As permissões runtime são solicitadas pelo próprio Android.", 14f, muted))
+        body.addView(space(18))
+        body.addView(rowButton("⌁", "Wi-Fi", "Conectar a uma rede dentro do JeaxLabs OS", { showWifiPage() }))
+        body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios sem abrir Configurações", { showBluetoothPage() }))
+        body.addView(rowButton("♧", "Notificações", "Ver avisos já autorizados", { showNotificationsPage() }))
+        body.addView(rowButton("⌘", "Device Owner", if (dpm.isDeviceOwnerApp(packageName)) "Provisionado — ativação automática" else "Necessário para Lock Task e políticas", { showDeviceOwnerHelp() }))
+        body.addView(button("Solicitar permissões do primeiro boot", { requestInitialPermissions() }, lavender, purple))
+        body.addView(button("Copiar comando de provisionamento para PC", { showDeviceOwnerHelp() }, lavender, purple))
+        body.addView(space(7))
+        body.addView(button("Concluir configuração", {
             prefs.edit().putBoolean("setup_done", true).apply()
             sessionUnlocked = true
-            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 92)
-            }
-            showHome()
-        }))
-        body.addView(button("Pular por enquanto", {
+            showLockScreen()
+        }, purple, Color.WHITE))
+        body.addView(button("Continuar e configurar depois", {
             prefs.edit().putBoolean("setup_done", true).apply()
             sessionUnlocked = true
-            showHome()
+            showLockScreen()
         }, Color.WHITE, purple))
         setContentView(pair.first)
+        if (!prefs.getBoolean("first_boot_permissions_requested", false)) {
+            prefs.edit().putBoolean("first_boot_permissions_requested", true).apply()
+            handler.postDelayed({ if (activePage == "setup") requestInitialPermissions() }, 450)
+        }
     }
 
     private fun showHome() {
         sessionUnlocked = true
         setBars(true)
         activePage = "home"
-        window.statusBarColor = Color.rgb(176, 59, 57)
-        window.navigationBarColor = Color.rgb(39, 52, 111)
-        window.decorView.systemUiVisibility = 0
         val pair = pageScroll(20)
         val body = pair.second
         pair.first.background = GradientDrawable(
@@ -744,9 +850,6 @@ class MainActivity : Activity() {
     private fun showLockScreen() {
         setBars(true)
         activePage = "lockscreen"
-        window.statusBarColor = Color.rgb(171, 59, 57)
-        window.navigationBarColor = Color.rgb(42, 52, 109)
-        window.decorView.systemUiVisibility = 0
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -895,13 +998,7 @@ class MainActivity : Activity() {
     }
 
     private fun launchApp(packageNameToOpen: String) {
-        try {
-            val launch = packageManager.getLaunchIntentForPackage(packageNameToOpen)
-            if (launch != null) startActivity(launch)
-            else toast("Este aplicativo não tem uma tela de início disponível.")
-        } catch (e: Exception) {
-            toast("Não foi possível abrir o aplicativo.")
-        }
+        showAppPreview(packageNameToOpen)
     }
 
     private fun showAppsPage(queryText: String = "") {
@@ -983,11 +1080,19 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 721) {
-            if (grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
-                showBluetoothPage()
-            } else {
+            if (grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) showBluetoothPage()
+            else {
                 toast("Permita Dispositivos por perto para usar o Bluetooth no JeaxLabs OS.")
                 showBluetoothPage()
+            }
+        }
+        if (requestCode == 730) {
+            toast(if (grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) "Permissões concedidas." else "Algumas permissões não foram concedidas.")
+            when (activePage) {
+                "bluetooth" -> showBluetoothPage()
+                "wifi" -> showWifiPage()
+                "setup" -> showSetup()
+                else -> showSettingsPage()
             }
         }
     }
@@ -1009,54 +1114,42 @@ class MainActivity : Activity() {
         body.addView(pageHeader("Bluetooth", "Dispositivos próximos e pareados"))
         val adapter = bluetoothAdapter()
         if (adapter == null) {
-            val unavailable = card(Color.WHITE, 18, 20)
-            unavailable.addView(label("Bluetooth não disponível", 17f, ink, true))
-            unavailable.addView(label("Este dispositivo não disponibiliza um adaptador Bluetooth para o aplicativo.", 13f, muted))
-            body.addView(unavailable)
+            body.addView(label("Bluetooth não está disponível neste dispositivo.", 14f, muted))
         } else if (!hasBluetoothPermissions()) {
-            val permissionCard = card(Color.WHITE, 18, 20)
-            permissionCard.addView(label("Permissão necessária", 17f, ink, true))
-            permissionCard.addView(label("Para procurar e mostrar dispositivos, o Android precisa autorizar o JeaxLabs OS a acessar dispositivos próximos.", 13f, muted))
-            permissionCard.addView(button("Permitir acesso ao Bluetooth", {
+            val info = card(Color.WHITE, 18, 20)
+            info.addView(label("Permissão necessária", 17f, ink, true))
+            info.addView(label("Autorize dispositivos próximos para buscar e parear acessórios.", 13f, muted))
+            info.addView(button("Solicitar permissões Bluetooth", {
                 val permissions = bluetoothPermissions()
-                if (permissions.isNotEmpty()) requestPermissions(permissions, 721)
-                else showBluetoothPage()
+                if (permissions.isNotEmpty()) requestPermissions(permissions, 721) else showBluetoothPage()
             }))
-            body.addView(permissionCard)
+            body.addView(info)
         } else {
             val enabled = try { adapter.isEnabled } catch (_: SecurityException) { false }
             val status = card(if (enabled) lavender else Color.WHITE, 18, 22)
             status.addView(label(if (enabled) "Bluetooth ativado" else "Bluetooth desativado", 19f, ink, true))
             status.addView(label(
-                if (enabled) "Você pode ver dispositivos pareados e buscar novos." else "Ative o Bluetooth para buscar e parear dispositivos.",
+                if (enabled) "Acessórios pareados e encontrados aparecem nesta tela."
+                else "Para alternar o rádio sem sair do JeaxLabs OS, o APK precisa estar provisionado como Device Owner.",
                 13f, muted
             ))
             status.addView(space(8))
-            if (!enabled) {
-                status.addView(button("Ativar Bluetooth", {
+            status.addView(button(if (enabled) "Desativar Bluetooth" else "Ativar Bluetooth", {
+                if (!dpm.isDeviceOwnerApp(packageName)) {
+                    showDeviceOwnerHelp()
+                } else {
                     try {
-                        startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                        @Suppress("DEPRECATION")
+                        val requested = if (enabled) adapter.disable() else adapter.enable()
+                        if (requested) toast(if (enabled) "Solicitando desligamento do Bluetooth." else "Solicitando ativação do Bluetooth.")
+                        else toast("O Android recusou o comando do rádio Bluetooth.")
+                        handler.postDelayed({ if (activePage == "bluetooth") showBluetoothPage() }, 900)
                     } catch (_: Exception) {
-                        openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+                        toast("Não foi possível controlar Bluetooth neste estado.")
                     }
-                }))
-            } else if (dpm.isDeviceOwnerApp(packageName) && Build.VERSION.SDK_INT >= 33) {
-                status.addView(button("Desativar Bluetooth", {
-                    try {
-                        val result = adapter.disable()
-                        if (!result) openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
-                        else toast("Solicitando desligamento do Bluetooth.")
-                    } catch (_: Exception) {
-                        openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
-                    }
-                }, Color.WHITE, purple))
-            } else {
-                status.addView(button("Gerenciar Bluetooth do Android", {
-                    openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
-                }, Color.WHITE, purple))
-            }
+                }
+            }))
             body.addView(status)
-
             body.addView(button(
                 if (try { adapter.isDiscovering } catch (_: Exception) { false }) "Interromper busca" else "Buscar dispositivos próximos",
                 {
@@ -1065,50 +1158,37 @@ class MainActivity : Activity() {
                             adapter.cancelDiscovery()
                         } else {
                             discoveredBluetoothDevices.clear()
-                            val started = adapter.startDiscovery()
-                            if (started) toast("Buscando dispositivos Bluetooth próximos…")
-                            else toast("Não foi possível iniciar a busca. Confira as permissões e tente novamente.")
+                            if (!adapter.startDiscovery()) toast("A busca não iniciou; confira as permissões.")
                         }
-                        showBluetoothPage()
+                        handler.postDelayed({ if (activePage == "bluetooth") showBluetoothPage() }, 350)
                     } catch (_: SecurityException) {
                         requestPermissions(bluetoothPermissions(), 721)
                     } catch (_: Exception) {
-                        toast("Falha ao buscar dispositivos Bluetooth.")
+                        toast("Falha ao buscar dispositivos.")
                     }
                 }
             ))
-
             section(body, "Dispositivos pareados")
-            val bonded = try { adapter.bondedDevices?.toList()?.sortedBy { it.name ?: it.address } ?: emptyList() }
-                catch (_: SecurityException) { emptyList() }
-            if (bonded.isEmpty()) {
-                body.addView(label("Nenhum dispositivo pareado encontrado.", 13f, muted))
-            } else {
-                bonded.forEach { device ->
-                    val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
-                    body.addView(rowButton("ᛒ", name, device.address, {
-                        showBluetoothDeviceDialog(device, true)
-                    }, teal))
-                }
+            val bonded = try {
+                adapter.bondedDevices?.toList()?.sortedBy { it.name ?: it.address } ?: emptyList()
+            } catch (_: Exception) { emptyList() }
+            if (bonded.isEmpty()) body.addView(label("Nenhum dispositivo pareado.", 13f, muted))
+            else bonded.forEach { device ->
+                val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
+                body.addView(rowButton("ᛒ", name, device.address, { showBluetoothDeviceDialog(device, true) }, teal))
             }
-
             section(body, "Encontrados nesta busca")
             val nearby = discoveredBluetoothDevices.values
-                .filter { device -> bonded.none { it.address == device.address } }
+                .filter { found -> bonded.none { it.address == found.address } }
                 .sortedBy { try { it.name ?: it.address } catch (_: Exception) { it.address } }
-            if (nearby.isEmpty()) {
-                body.addView(label("Toque em Buscar dispositivos próximos para procurar acessórios.", 13f, muted))
-            } else {
-                nearby.forEach { device ->
-                    val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
-                    body.addView(rowButton("＋", name, device.address, {
-                        showBluetoothDeviceDialog(device, false)
-                    }))
-                }
+            if (nearby.isEmpty()) body.addView(label("Toque em Buscar dispositivos próximos.", 13f, muted))
+            else nearby.forEach { device ->
+                val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
+                body.addView(rowButton("＋", name, device.address, { showBluetoothDeviceDialog(device, false) }))
             }
-            body.addView(label("O pareamento pode solicitar confirmação do Android. Conexões de áudio e periféricos são gerenciadas pelo perfil Bluetooth compatível do dispositivo.", 12f, muted))
         }
-        body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
+        body.addView(label("A confirmação segura de pareamento, quando exigida pelo Android, permanece sob controle do sistema.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
         setContentView(pair.first)
     }
 
@@ -1116,13 +1196,12 @@ class MainActivity : Activity() {
         val name = try { device.name ?: device.address } catch (_: Exception) { device.address }
         AlertDialog.Builder(this)
             .setTitle(name)
-            .setMessage(if (paired) "Este dispositivo já está pareado com o Android." else "Deseja solicitar o pareamento com este dispositivo?")
+            .setMessage(if (paired) "Dispositivo já pareado." else "Solicitar pareamento Bluetooth?")
             .setPositiveButton(if (paired) "OK" else "Parear") { _, _ ->
                 if (!paired) {
                     try {
-                        val requested = device.createBond()
-                        if (requested) toast("Solicitação de pareamento enviada ao Android.")
-                        else toast("Não foi possível solicitar o pareamento.")
+                        val result = device.createBond()
+                        toast(if (result) "Solicitação de pareamento enviada." else "Não foi possível solicitar o pareamento.")
                     } catch (_: SecurityException) {
                         requestPermissions(bluetoothPermissions(), 721)
                     } catch (_: Exception) {
@@ -1130,23 +1209,433 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            .setNeutralButton("Configurações Bluetooth") { _, _ ->
-                openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+            .setNegativeButton("Voltar", null)
+            .show()
+    }
+
+    private fun requestInitialPermissions() {
+        val required = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= 31) {
+            required.add(android.Manifest.permission.BLUETOOTH_SCAN)
+            required.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+        } else if (Build.VERSION.SDK_INT >= 23) {
+            required.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            required.add(android.Manifest.permission.POST_NOTIFICATIONS)
+            required.add(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
+        val missing = required.distinct().filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            toast("Permissões básicas já concedidas.")
+            return
+        }
+        requestPermissions(missing.toTypedArray(), 730)
+    }
+
+    private fun wifiManager(): WifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    private fun showWifiPage() {
+        setBars(false)
+        activePage = "wifi"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Wi-Fi e internet", "Configuração dentro do JeaxLabs OS"))
+        val wifi = wifiManager()
+        val enabled = try { wifi.isWifiEnabled } catch (_: Exception) { false }
+        val currentSsid = try {
+            wifi.connectionInfo?.ssid?.trim('"')?.takeIf { it != "<unknown ssid>" } ?: "Não identificada"
+        } catch (_: Exception) { "Não identificada" }
+        val status = card(if (enabled) lavender else Color.WHITE, 18, 22)
+        status.addView(label(if (enabled) "Wi-Fi ativado" else "Wi-Fi desativado", 19f, ink, true))
+        status.addView(label(if (enabled) "Rede atual: $currentSsid" else "Nenhuma rede Wi-Fi ativa", 13f, muted))
+        status.addView(label(
+            if (dpm.isDeviceOwnerApp(packageName)) "Controle de redes pelo Device Owner."
+            else "Antes do Device Owner, conectar a uma rede pode exigir a confirmação protegida do Android.",
+            12f, muted
+        ))
+        status.addView(space(8))
+        status.addView(button(if (enabled) "Desativar Wi-Fi" else "Ativar Wi-Fi", {
+            if (!dpm.isDeviceOwnerApp(packageName)) {
+                showDeviceOwnerHelp()
+            } else {
+                try {
+                    @Suppress("DEPRECATION")
+                    val changed = wifi.setWifiEnabled(!wifi.isWifiEnabled)
+                    if (changed) {
+                        toast("Comando Wi-Fi enviado.")
+                        handler.postDelayed({ if (activePage == "wifi") showWifiPage() }, 900)
+                    } else toast("O Android recusou a alteração do Wi-Fi.")
+                } catch (_: Exception) {
+                    toast("Não foi possível alterar o Wi-Fi neste estado.")
+                }
+            }
+        }))
+        body.addView(status)
+        body.addView(rowButton("＋", "Conectar a uma rede", "Informe nome e senha dentro do JeaxLabs OS", { promptWifiConnection() }))
+        body.addView(rowButton("ᛒ", "Bluetooth", "Parear e administrar acessórios", { showBluetoothPage() }))
+        body.addView(label("O sistema operacional pode exibir uma confirmação protegida ao conectar-se a uma rede; ela não é uma Activity de Configurações iniciada pelo JeaxLabs.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun promptWifiConnection() {
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val ssid = EditText(this).apply { hint = "Nome da rede (SSID)"; setSingleLine() }
+        val password = EditText(this).apply {
+            hint = "Senha da rede (vazio para rede aberta)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        fields.addView(ssid)
+        fields.addView(password)
+        AlertDialog.Builder(this)
+            .setTitle("Conectar ao Wi-Fi")
+            .setMessage("Digite os dados da rede.")
+            .setView(fields)
+            .setPositiveButton("Conectar") { _, _ ->
+                val name = ssid.text.toString().trim()
+                if (name.isBlank()) toast("Informe o nome da rede.") else connectWifi(name, password.text.toString())
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun openPanelOrSettings(panelAction: String, fallbackAction: String) {
-        try {
-            if (Build.VERSION.SDK_INT >= 29) {
-                startActivity(Intent(panelAction))
-            } else {
-                openSettings(fallbackAction)
+    private fun connectWifi(ssid: String, password: String) {
+        if (dpm.isDeviceOwnerApp(packageName)) {
+            try {
+                val config = WifiConfiguration().apply {
+                    SSID = "\"" + ssid.replace("\"", "") + "\""
+                    if (password.isBlank()) {
+                        allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE)
+                    } else {
+                        preSharedKey = "\"" + password.replace("\"", "") + "\""
+                        allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
+                    }
+                }
+                @Suppress("DEPRECATION")
+                val id = wifiManager().addNetwork(config)
+                if (id < 0) {
+                    toast("O Android não aceitou adicionar esta rede.")
+                    return
+                }
+                @Suppress("DEPRECATION")
+                val networkEnabled = wifiManager().enableNetwork(id, true)
+                @Suppress("DEPRECATION")
+                val reconnected = wifiManager().reconnect()
+                toast(if (networkEnabled && reconnected) "Conexão de rede solicitada." else "Rede salva; aguardando conexão.")
+                handler.postDelayed({ if (activePage == "wifi") showWifiPage() }, 1000)
+            } catch (_: SecurityException) {
+                toast("O controle direto de redes requer Device Owner ativo.")
+            } catch (e: Exception) {
+                toast("Falha ao conectar: " + (e.message ?: "erro de rede"))
             }
-        } catch (_: Exception) {
-            openSettings(fallbackAction)
+            return
         }
+        if (Build.VERSION.SDK_INT < 29) {
+            toast("Conexão interna direta requer Android 10 ou Device Owner.")
+            showDeviceOwnerHelp()
+            return
+        }
+        try {
+            val spec = WifiNetworkSpecifier.Builder().setSsid(ssid).apply {
+                if (password.isNotBlank()) setWpa2Passphrase(password)
+            }.build()
+            val request = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .setNetworkSpecifier(spec)
+                .build()
+            val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            wifiRequestCallback?.let { old ->
+                try { manager.unregisterNetworkCallback(old) } catch (_: Exception) {}
+            }
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    manager.bindProcessToNetwork(network)
+                    runOnUiThread {
+                        toast("Rede conectada para o JeaxLabs OS.")
+                        if (activePage == "wifi") showWifiPage()
+                    }
+                }
+                override fun onUnavailable() {
+                    runOnUiThread { toast("Conexão recusada ou rede indisponível.") }
+                }
+                override fun onLost(network: Network) {
+                    if (manager.boundNetworkForProcess == network) manager.bindProcessToNetwork(null)
+                    runOnUiThread { if (activePage == "wifi") showWifiPage() }
+                }
+            }
+            wifiRequestCallback = callback
+            manager.requestNetwork(request, callback, 45000)
+            toast("O Android pode pedir confirmação da rede; o JeaxLabs OS continuará aberto.")
+        } catch (_: SecurityException) {
+            toast("Conceda acesso a dispositivos Wi-Fi por perto no primeiro boot.")
+        } catch (e: Exception) {
+            toast("Não foi possível iniciar a conexão: " + (e.message ?: "erro de rede"))
+        }
+    }
+
+    private fun applySystemBrightness(value: Int) {
+        val bounded = value.coerceIn(20, 255)
+        prefs.edit().putInt("display_brightness", bounded).apply()
+        window.attributes = window.attributes.apply { screenBrightness = bounded / 255f }
+        if (dpm.isDeviceOwnerApp(packageName) && Build.VERSION.SDK_INT >= 30) {
+            try {
+                dpm.setSystemSetting(adminComponent, Settings.System.SCREEN_BRIGHTNESS, bounded.toString())
+                dpm.setSystemSetting(adminComponent, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL.toString())
+            } catch (_: Exception) {
+                prefs.edit().putString("brightness_policy_note", "O Android não permitiu alterar o brilho global.").apply()
+            }
+        }
+    }
+
+    private fun showDisplaySettingsPage() {
+        setBars(false)
+        activePage = "display"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Tela e aparência", "Controles JeaxLabs"))
+        val brightness = card(Color.WHITE, 18, 20)
+        brightness.addView(label("Brilho da tela", 17f, ink, true))
+        brightness.addView(label(
+            if (dpm.isDeviceOwnerApp(packageName)) "Controle global quando o firmware permitir."
+            else "Antes do Device Owner, o brilho garantido é o da interface JeaxLabs.",
+            12f, muted
+        ))
+        val slider = SeekBar(this).apply {
+            max = 255
+            progress = prefs.getInt("display_brightness", 165)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) applySystemBrightness(progress)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        brightness.addView(slider)
+        body.addView(brightness)
+        body.addView(rowButton("◷", "Tempo para apagar a tela", "Escolher suspensão automática", { showScreenTimeoutDialog() }))
+        body.addView(rowButton("↻", "Rotação automática", "Alternar rotação pela política do dispositivo", { toggleAutoRotate() }))
+        body.addView(rowButton("🎨", "Aparência JeaxLabs", "Preferência visual interna", { showAppearanceDialog() }))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showScreenTimeoutDialog() {
+        val values = arrayOf(15000, 30000, 60000, 120000, 300000, 600000)
+        val labels = arrayOf("15 segundos", "30 segundos", "1 minuto", "2 minutos", "5 minutos", "10 minutos")
+        AlertDialog.Builder(this)
+            .setTitle("Apagar a tela após")
+            .setSingleChoiceItems(labels, -1) { dialog, index ->
+                val value = values[index]
+                prefs.edit().putInt("screen_timeout_ms", value).apply()
+                if (dpm.isDeviceOwnerApp(packageName) && Build.VERSION.SDK_INT >= 30) {
+                    try {
+                        dpm.setSystemSetting(adminComponent, Settings.System.SCREEN_OFF_TIMEOUT, value.toString())
+                        toast("Tempo de suspensão atualizado.")
+                    } catch (_: Exception) {
+                        toast("O Android não permitiu alterar o tempo global.")
+                    }
+                } else toast("Preferência salva para a simulação; controle global requer Device Owner.")
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun toggleAutoRotate() {
+        if (!dpm.isDeviceOwnerApp(packageName) || Build.VERSION.SDK_INT < 30) {
+            toast("Rotação global exige Device Owner e suporte do firmware.")
+            showDeviceOwnerHelp()
+            return
+        }
+        try {
+            val current = Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1)
+            dpm.setSystemSetting(adminComponent, Settings.System.ACCELEROMETER_ROTATION, if (current == 1) "0" else "1")
+            toast(if (current == 1) "Rotação automática desativada." else "Rotação automática ativada.")
+        } catch (_: Exception) {
+            toast("Não foi possível alterar a rotação global neste firmware.")
+        }
+    }
+
+    private fun showAppearanceDialog() {
+        val options = arrayOf("Aparência clara", "Aparência escura")
+        AlertDialog.Builder(this)
+            .setTitle("Aparência JeaxLabs")
+            .setSingleChoiceItems(options, prefs.getInt("appearance_dark", 0)) { dialog, which ->
+                prefs.edit().putInt("appearance_dark", which).apply()
+                toast("Preferência de aparência salva.")
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showSoundSettingsPage() {
+        setBars(false)
+        activePage = "sound"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Som e vibração", "Ajustes internos do dispositivo"))
+        val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        addVolumeControl(body, audio, "Mídia", AudioManager.STREAM_MUSIC)
+        addVolumeControl(body, audio, "Toque", AudioManager.STREAM_RING)
+        addVolumeControl(body, audio, "Alarmes", AudioManager.STREAM_ALARM)
+        addVolumeControl(body, audio, "Notificações", AudioManager.STREAM_NOTIFICATION)
+        body.addView(label("Os volumes são aplicados ao Android sem abrir outra tela.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun addVolumeControl(parent: LinearLayout, audio: AudioManager, title: String, stream: Int) {
+        val item = card(Color.WHITE, 17, 20)
+        item.addView(label(title, 15f, ink, true))
+        val slider = SeekBar(this).apply {
+            max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+            progress = audio.getStreamVolume(stream).coerceIn(0, max)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) try { audio.setStreamVolume(stream, progress, 0) } catch (_: Exception) {}
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        item.addView(slider)
+        parent.addView(item)
+    }
+
+    private fun showBatteryPage() {
+        setBars(false)
+        activePage = "battery"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Bateria e energia", "Estado informado pelo Android"))
+        val statusIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = statusIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = statusIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
+        val status = statusIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        val item = card(if (pct >= 20) Color.WHITE else lavender, 20, 22)
+        item.addView(label(if (pct >= 0) "$pct%" else "—", 36f, ink, true))
+        item.addView(label(if (charging) "Carregando" else "Bateria em uso", 14f, muted))
+        body.addView(item)
+        body.addView(rowButton("◴", "Economia de energia", "Alternância depende da política do Android", { toast("Este firmware não expõe economia de energia ao APK comum.") }))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showAppsManagementPage() {
+        setBars(false)
+        activePage = "appmanagement"
+        cachedApps = loadLaunchableApps()
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Aplicativos instalados", "Lista interna do JeaxLabs OS"))
+        body.addView(label(cachedApps.size.toString() + " aplicativos com atalho disponíveis", 13f, muted))
+        addAppGrid(body, cachedApps, 4)
+        body.addView(label("Tocar num ícone abre a ficha simulada do aplicativo dentro do JeaxLabs OS; nenhum APK externo será iniciado.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showStoragePage() {
+        setBars(false)
+        activePage = "storage"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Armazenamento", "Informações do dispositivo"))
+        try {
+            val stat = StatFs(Environment.getDataDirectory().absolutePath)
+            val total = stat.blockCountLong * stat.blockSizeLong
+            val available = stat.availableBlocksLong * stat.blockSizeLong
+            val used = total - available
+            val gb = 1024.0 * 1024.0 * 1024.0
+            val item = card(Color.WHITE, 20, 22)
+            item.addView(label(String.format(Locale.getDefault(), "%.1f GB usados", used / gb), 24f, ink, true))
+            item.addView(label(String.format(Locale.getDefault(), "%.1f GB disponíveis", available / gb), 14f, muted))
+            item.addView(label(String.format(Locale.getDefault(), "%.1f GB totais", total / gb), 13f, muted))
+            body.addView(item)
+        } catch (_: Exception) {
+            body.addView(label("Não foi possível ler o armazenamento.", 13f, muted))
+        }
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showSecurityPage() {
+        setBars(false)
+        activePage = "security"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Segurança e bloqueio", "Políticas do sistema"))
+        val owner = dpm.isDeviceOwnerApp(packageName)
+        val managed = prefs.getBoolean("kiosk_enabled", false)
+        val keyguard = prefs.getBoolean("jeax_keyguard_disabled", false)
+        val item = card(Color.WHITE, 18, 22)
+        item.addView(label(if (owner) "Device Owner ativo" else "Device Owner não provisionado", 18f, ink, true))
+        item.addView(label(if (managed) "Task Lock imersivo ativo" else "Task Lock aguardando provisionamento", 13f, muted))
+        item.addView(label(if (keyguard) "Keyguard Android desativado" else "O Android pode manter um PIN/padrão seguro", 12f, muted))
+        body.addView(item)
+        body.addView(rowButton("⌘", "Provisionar Device Owner", "Copiar comando para o PC", { showDeviceOwnerHelp() }))
+        body.addView(rowButton("▣", "Tela de bloqueio JeaxLabs", "Prévia interna", { showLockScreen() }))
+        body.addView(label("O APK não concede Device Owner a si próprio e não remove credenciais seguras já existentes. A tela JeaxLabs substitui o bloqueio apenas quando a política gerenciada consegue desabilitar a keyguard.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showDeveloperPage() {
+        setBars(false)
+        activePage = "developer"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Opções de desenvolvimento", "Diagnóstico interno"))
+        val adb = try { Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1 } catch (_: Exception) { false }
+        body.addView(rowButton("⌘", "Depuração USB", if (adb) "Parece estar ativada" else "Não detectada/desativada", {
+            copyText("adb shell settings get global adb_enabled", "Comando de diagnóstico copiado.")
+        }))
+        body.addView(rowButton("◈", "Device Owner", if (dpm.isDeviceOwnerApp(packageName)) "Provisionado" else "Aguardando PC + ADB", { showDeviceOwnerHelp() }))
+        body.addView(rowButton("♧", "Permissões", "Solicitar permissões runtime", { requestInitialPermissions() }))
+        body.addView(label("Depuração USB e Device Owner são protegidos pelo Android e precisam de confirmação ou provisionamento no dispositivo/PC.", 12f, muted))
+        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun copyText(value: String, message: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("JeaxLabs OS", value))
+        toast(message)
+    }
+
+    private fun showAppPreview(packageNameToOpen: String) {
+        val info = cachedApps.firstOrNull { it.activityInfo.packageName == packageNameToOpen }
+        val appName = info?.loadLabel(packageManager)?.toString() ?: packageNameToOpen
+        activePage = "app-preview"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader(appName, "Prévia interna do aplicativo"))
+        val hero = card(Color.WHITE, 22, 22)
+        val iconView = ImageView(this).apply {
+            if (info != null) try { setImageDrawable(info.loadIcon(packageManager)) } catch (_: Exception) {}
+            layoutParams = LinearLayout.LayoutParams(dp(76), dp(76))
+        }
+        hero.addView(iconView)
+        hero.addView(space(12))
+        hero.addView(label(appName, 22f, ink, true))
+        hero.addView(label(packageNameToOpen, 11f, muted))
+        hero.addView(label("Simulação de lançamento", 13f, purple, true))
+        hero.addView(label("Este launcher não inicia aplicativos externos. Para executar um app de verdade ele precisa ser integrado ou liberado em uma versão futura.", 13f, muted))
+        body.addView(hero)
+        body.addView(button("Voltar aos aplicativos", { showAppsPage() }, lavender, purple))
+        body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
+        setContentView(pair.first)
     }
 
     private fun showControlCenter() {
@@ -1164,7 +1653,7 @@ class MainActivity : Activity() {
         body.addView(space(17))
         val status = card(Color.WHITE, 17, 22)
         status.addView(label("Controle do dispositivo", 17f, ink, true))
-        status.addView(label(getBatteryDescription() + "  ·  JeaxLabs OS 1.3.0", 12f, muted))
+        status.addView(label(getBatteryDescription() + "  ·  JeaxLabs OS 1.4.0", 12f, muted))
         body.addView(status)
 
         section(body, "Conexões e recursos")
@@ -1173,11 +1662,11 @@ class MainActivity : Activity() {
             useDefaultMargins = false
             layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        grid.addView(controlTile("⌁", "Wi-Fi", "Configurações da rede") { openPanelOrSettings(Settings.Panel.ACTION_WIFI, Settings.ACTION_WIFI_SETTINGS) }, gridParams())
+        grid.addView(controlTile("⌁", "Wi-Fi", "Configurações da rede") { showWifiPage() }, gridParams())
         grid.addView(controlTile("ᛒ", "Bluetooth", "Acessórios próximos") { showBluetoothPage() }, gridParams())
-        grid.addView(controlTile("☼", "Tela", "Brilho e rotação") { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }, gridParams())
-        grid.addView(controlTile("♫", "Som", "Volume e áudio") { openSettings(Settings.ACTION_SOUND_SETTINGS) }, gridParams())
-        grid.addView(controlTile("▤", "Bateria", getBatteryDescription()) { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }, gridParams())
+        grid.addView(controlTile("☼", "Tela", "Brilho e rotação") { showDisplaySettingsPage() }, gridParams())
+        grid.addView(controlTile("♫", "Som", "Volume e áudio") { showSoundSettingsPage() }, gridParams())
+        grid.addView(controlTile("▤", "Bateria", getBatteryDescription()) { showBatteryPage() }, gridParams())
         grid.addView(controlTile("♧", "Notificações", "Ver avisos ativos") { showNotificationsPage() }, gridParams())
         body.addView(grid)
 
@@ -1189,9 +1678,7 @@ class MainActivity : Activity() {
             progress = prefs.getInt("ui_brightness", 75)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val attributes = window.attributes
-                    attributes.screenBrightness = progress.coerceAtLeast(8) / 100f
-                    window.attributes = attributes
+                    applySystemBrightness((progress.coerceAtLeast(8) * 255) / 100)
                     prefs.edit().putInt("ui_brightness", progress).apply()
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -1226,23 +1713,23 @@ class MainActivity : Activity() {
         activePage = "settings"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("Configurações", "Personalize seu dispositivo"))
-        body.addView(rowButton("⌁", "Conexões", "Wi-Fi e redes móveis", { openPanelOrSettings(Settings.Panel.ACTION_INTERNET_CONNECTIVITY, Settings.ACTION_WIFI_SETTINGS) }))
-        body.addView(rowButton("ᛒ", "Bluetooth", "Dispositivos pareados", { showBluetoothPage() }))
-        body.addView(rowButton("☼", "Tela", "Brilho, rotação e suspensão", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
-        body.addView(rowButton("♫", "Som e vibração", "Volume e preferências de áudio", { openPanelOrSettings(Settings.Panel.ACTION_VOLUME, Settings.ACTION_SOUND_SETTINGS) }))
-        body.addView(rowButton("♧", "Notificações", "Acesso e preferências", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
-        body.addView(rowButton("▣", "Tela de bloqueio simulada", "Prévia do bloqueio JeaxLabs OS", { showLockScreen() }))
-        body.addView(rowButton("↻", "Reiniciar interface", "Reproduzir a tela de inicialização", {
+        body.addView(pageHeader("Configurações JeaxLabs", "Controles integrados do sistema"))
+        body.addView(rowButton("⌁", "Wi-Fi e internet", "Conectar, salvar e controlar redes", { showWifiPage() }))
+        body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios e controlar o rádio", { showBluetoothPage() }))
+        body.addView(rowButton("☼", "Tela e aparência", "Brilho, suspensão e rotação", { showDisplaySettingsPage() }))
+        body.addView(rowButton("♫", "Som e vibração", "Volumes de mídia, toque e alarme", { showSoundSettingsPage() }))
+        body.addView(rowButton("▤", "Bateria e energia", getBatteryDescription(), { showBatteryPage() }))
+        body.addView(rowButton("♧", "Notificações", "Central interna de avisos", { showNotificationsPage() }))
+        body.addView(rowButton("▣", "Aplicativos instalados", "Grade e fichas simuladas", { showAppsManagementPage() }))
+        body.addView(rowButton("▰", "Armazenamento", "Uso de armazenamento", { showStoragePage() }))
+        body.addView(rowButton("◇", "Segurança e bloqueio", "Device Owner, keyguard e Task Lock", { showSecurityPage() }))
+        body.addView(rowButton("⌘", "Opções de desenvolvimento", "Status ADB e permissões", { showDeveloperPage() }))
+        body.addView(rowButton("▧", "Tela de bloqueio JeaxLabs", "Prévia interna", { showLockScreen() }))
+        body.addView(rowButton("↻", "Reiniciar interface", "Reproduzir o boot JeaxLabs", {
             sessionUnlocked = false
             showStartup()
         }))
-        body.addView(rowButton("▦", "Aplicativos", "Aplicativos instalados e padrões", { openSettings(Settings.ACTION_APPLICATION_SETTINGS) }))
-        body.addView(rowButton("▤", "Armazenamento", "Espaço usado e disponível", { openSettings(Settings.ACTION_INTERNAL_STORAGE_SETTINGS) }))
-        body.addView(rowButton("◇", "Segurança", "Bloqueio de tela e permissões", { openSettings(Settings.ACTION_SECURITY_SETTINGS) }))
-        body.addView(rowButton("⌘", "Opções do desenvolvedor", "Ferramentas de desenvolvimento", { openSettings(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) }))
-        body.addView(rowButton("ⓘ", "Sobre o JeaxLabs OS", "Versão, dispositivo e estado do sistema", { showAboutPage() }))
-        body.addView(space(7))
+        body.addView(rowButton("ⓘ", "Sobre o JeaxLabs OS", "Build, dispositivo e modo gerenciado", { showAboutPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
     }
@@ -1252,26 +1739,26 @@ class MainActivity : Activity() {
         activePage = "notifications"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("Notificações", "Avisos ativos do seu dispositivo"))
+        body.addView(pageHeader("Notificações", "Central interna JeaxLabs"))
+        val enabled = try {
+            Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+                .orEmpty().split(':').any { it.contains(packageName) }
+        } catch (_: Exception) { false }
+        val info = card(if (enabled) Color.WHITE else lavender, 18, 20)
+        info.addView(label(if (enabled) "Acesso a notificações ativo" else "Acesso especial não concedido", 16f, ink, true))
+        info.addView(label(
+            if (enabled) "As notificações ativas fornecidas pelo Android aparecem abaixo."
+            else "A leitura de notificações de outros aplicativos depende de uma autorização especial protegida pelo Android. Esta versão não abre outra Activity; sem a autorização, a lista ficará vazia.",
+            12f, muted
+        ))
+        body.addView(info)
+        body.addView(button("Atualizar", { showNotificationsPage() }, lavender, purple, 44))
         val rows = readSavedNotifications()
-        if (!prefs.getBoolean("notifications_hint_seen", false)) {
-            val info = card(lavender, 16, 18)
-            info.addView(label("Permita o acesso às notificações", 15f, purpleDark, true))
-            info.addView(label("O Android exige sua autorização para que o JeaxLabs OS mostre notificações de outros aplicativos. Você pode ativar ou retirar o acesso a qualquer momento.", 13f, purpleDark))
-            info.addView(space(8))
-            info.addView(button("Abrir acesso às notificações", {
-                prefs.edit().putBoolean("notifications_hint_seen", true).apply()
-                openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            }))
-            body.addView(info)
-        }
-        body.addView(button("Atualizar lista", { showNotificationsPage() }, lavender, purple, 44))
         if (rows.length() == 0) {
             val empty = card(Color.WHITE, 20, 20)
             empty.gravity = Gravity.CENTER
             empty.addView(label("♧", 33f, purple).apply { gravity = Gravity.CENTER })
-            empty.addView(label("Nenhuma notificação salva", 16f, ink, true).apply { gravity = Gravity.CENTER })
-            empty.addView(label("Ative o acesso especial acima e volte para consultar avisos ativos.", 13f, muted).apply { gravity = Gravity.CENTER })
+            empty.addView(label("Nenhuma notificação disponível", 16f, ink, true).apply { gravity = Gravity.CENTER })
             body.addView(empty)
         } else {
             for (i in 0 until rows.length()) {
@@ -1283,6 +1770,7 @@ class MainActivity : Activity() {
                 body.addView(row)
             }
         }
+        body.addView(button("Solicitar permissões runtime", { requestInitialPermissions() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
     }
@@ -1298,83 +1786,50 @@ class MainActivity : Activity() {
         activePage = "tasklocker"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("JeaxLabs Task Locker", "Modo de uso controlado"))
+        body.addView(pageHeader("JeaxLabs Task Locker", "Modo de sistema gerenciado"))
+        val owner = dpm.isDeviceOwnerApp(packageName)
         val hero = card(purpleDark, 20, 24)
         hero.addView(label("▣", 34f, Color.WHITE, true))
         hero.addView(space(5))
-        hero.addView(label("Mantenha o dispositivo em um único ambiente.", 21f, Color.WHITE, true))
-        hero.addView(label("Quando ativado com o JeaxLabs OS configurado como Device Owner, o Android bloqueia a navegação fora do aplicativo permitido.", 13f, Color.rgb(232, 224, 255)))
+        hero.addView(label(if (owner) "Bloqueio de sistema ativo" else "Provisionamento necessário", 21f, Color.WHITE, true))
+        hero.addView(label("Com Device Owner, o JeaxLabs tenta entrar automaticamente em Lock Task, ocultar as barras e desativar a cortina de notificações. Todas as páginas internas continuam neste APK.", 13f, Color.rgb(232, 224, 255)))
         body.addView(hero)
-        if (dpm.isDeviceOwnerApp(packageName)) {
-            body.addView(rowButton("✓", "Device Owner ativo", "O Android permite gerenciar o modo de tarefa bloqueada", { showAboutPage() }, teal))
-            if (prefs.getBoolean("kiosk_enabled", false)) {
-                body.addView(button("Desbloquear com PIN", { showPinDialog("Desbloquear Task Locker") { stopKiosk() } }))
-            } else {
-                body.addView(button("Configurar PIN e ativar Task Locker", { setPinAndStartKiosk() }))
-            }
+        if (owner) {
+            ensureManagedSystemMode()
+            body.addView(rowButton("✓", "Device Owner ativo", "Políticas reaplicadas ao abrir a interface", { showSecurityPage() }, teal))
+            body.addView(rowButton("▣", "Keyguard Android", if (prefs.getBoolean("jeax_keyguard_disabled", false)) "Desativado pela política" else "O Android pode manter um PIN/padrão seguro", { showSecurityPage() }))
+            body.addView(button("Reaplicar modo sistema", {
+                ensureManagedSystemMode()
+                if (!isSystemLockTaskActive()) startManagedLockTask()
+                showLockScreen()
+            }))
         } else {
-            body.addView(rowButton("!", "Device Owner não está ativo", "É obrigatório para o bloqueio real do Android", { showDeviceOwnerHelp() }, Color.rgb(195, 106, 34)))
-            body.addView(button("Como ativar o Device Owner", { showDeviceOwnerHelp() }))
+            body.addView(rowButton("!", "Device Owner não ativo", "O provisionamento precisa do PC e ADB", { showDeviceOwnerHelp() }, Color.rgb(195, 106, 34)))
+            body.addView(button("Copiar comando de provisionamento", { showDeviceOwnerHelp() }))
         }
-        body.addView(label("Limite técnico: isso ativa o modo de tarefa bloqueada do Android, não substitui a ROM nem altera a animação de inicialização original.", 12f, muted))
-        body.addView(space(10))
+        body.addView(label("O app não consegue conceder Device Owner a si próprio nem apagar um PIN/padrão seguro já configurado no Android.", 12f, muted))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
     }
 
     private fun showDeviceOwnerHelp() {
+        val command = "adb shell dpm set-device-owner br.com.jeaxlabs.os/.JeaxDeviceAdminReceiver"
+        val owner = dpm.isDeviceOwnerApp(packageName)
         AlertDialog.Builder(this)
-            .setTitle("Ativar o Device Owner")
-            .setMessage("O app precisa estar instalado e o dispositivo preparado para provisionamento. Em geral, é necessário restaurar o tablet de fábrica e não adicionar contas antes de executar o comando no computador com ADB autorizado.")
-            .setPositiveButton("Copiar comando") { _, _ ->
-                val command = "adb shell dpm set-device-owner br.com.jeaxlabs.os/.JeaxDeviceAdminReceiver"
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Comando Device Owner", command))
-                toast("Comando copiado.")
+            .setTitle(if (owner) "Device Owner ativo" else "Provisionar JeaxLabs OS pelo PC")
+            .setMessage(if (owner)
+                "O JeaxLabs OS já é Device Owner. Task Lock e as políticas serão reaplicados automaticamente."
+                else
+                "Device Owner não é uma permissão runtime e o próprio APK não pode concedê-la. Em geral, o tablet precisa estar recém-restaurado e sem contas adicionadas. Conecte por USB, autorize ADB e execute o comando no PC. Esta tela não abre Configurações nem outro aplicativo.")
+            .setPositiveButton(if (owner) "Fechar" else "Copiar comando") { _, _ ->
+                if (!owner) copyText(command, "Comando Device Owner copiado.")
             }
-            .setNegativeButton("Fechar", null)
-            .show()
-    }
-
-    private fun setPinAndStartKiosk() {
-        val input = EditText(this).apply {
-            hint = "Crie um PIN com pelo menos 4 dígitos"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Criar PIN do Task Locker")
-            .setMessage("Guarde este PIN. Ele será solicitado para sair do modo bloqueado.")
-            .setView(input)
-            .setPositiveButton("Ativar") { _, _ ->
-                val pin = input.text.toString()
-                if (pin.length < 4) {
-                    toast("O PIN deve ter pelo menos 4 dígitos.")
-                    return@setPositiveButton
-                }
-                prefs.edit().putString("kiosk_pin_hash", hashPin(pin)).putBoolean("kiosk_enabled", true).apply()
-                configureAndStartKiosk()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun hashPin(pin: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest((packageName + ":" + pin).toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
-    private fun showPinDialog(title: String, success: () -> Unit) {
-        val input = EditText(this).apply {
-            hint = "PIN"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        }
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(input)
-            .setPositiveButton("Desbloquear") { _, _ ->
-                val saved = prefs.getString("kiosk_pin_hash", null)
-                if (saved != null && hashPin(input.text.toString()) == saved) success()
-                else toast("PIN incorreto.")
+            .setNeutralButton("Verificar novamente") { _, _ ->
+                if (dpm.isDeviceOwnerApp(packageName)) {
+                    ensureManagedSystemMode()
+                    if (!isSystemLockTaskActive()) startManagedLockTask()
+                    toast("Device Owner detectado; modo de sistema aplicado.")
+                } else toast("Device Owner ainda não está ativo.")
             }
             .setNegativeButton("Cancelar", null)
             .show()
@@ -1382,37 +1837,28 @@ class MainActivity : Activity() {
 
     private fun configureAndStartKiosk() {
         if (!dpm.isDeviceOwnerApp(packageName)) {
-            prefs.edit().putBoolean("kiosk_enabled", false).apply()
-            toast("Ative o Device Owner primeiro.")
+            toast("O próprio APK não pode se tornar Device Owner. Execute o comando ADB no PC.")
             showDeviceOwnerHelp()
             return
         }
-        try {
-            dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
-            val features = DevicePolicyManager.LOCK_TASK_FEATURE_HOME or
-                DevicePolicyManager.LOCK_TASK_FEATURE_OVERVIEW or
-                DevicePolicyManager.LOCK_TASK_FEATURE_NOTIFICATIONS or
-                DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO or
-                DevicePolicyManager.LOCK_TASK_FEATURE_GLOBAL_ACTIONS
-            dpm.setLockTaskFeatures(adminComponent, features)
-            showKioskScreen()
-            handler.postDelayed({ startManagedLockTask() }, 250)
-        } catch (e: Exception) {
-            prefs.edit().putBoolean("kiosk_enabled", false).apply()
-            toast("O Android não permitiu ativar o Task Locker: " + (e.message ?: "erro de configuração"))
+        if (ensureManagedSystemMode()) {
+            startManagedLockTask()
+            if (prefs.getBoolean("setup_done", false)) showLockScreen() else showSetup()
+        } else {
+            toast("O Android recusou uma política do modo sistema.")
+            showSecurityPage()
         }
     }
 
     private fun startManagedLockTask() {
         if (isFinishing || !dpm.isDeviceOwnerApp(packageName)) return
         try {
-            dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
-            if (!isSystemLockTaskActive()) {
-                startLockTask()
-            }
+            ensureManagedSystemMode()
+            if (!isSystemLockTaskActive()) startLockTask()
             kioskStartPending = true
+            applySystemUiMode()
         } catch (e: Exception) {
-            toast("Falha ao iniciar o modo bloqueado.")
+            toast("Não foi possível ativar Task Lock: " + (e.message ?: "erro de política"))
         }
     }
 
@@ -1423,32 +1869,15 @@ class MainActivity : Activity() {
     }
 
     private fun showKioskScreen() {
-        setBars(true)
-        activePage = "kiosk"
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(28), dp(28), dp(28), dp(28))
-            background = gradient(Color.rgb(34, 27, 67), Color.rgb(102, 68, 175))
-        }
-        root.addView(brandMark(76))
-        root.addView(space(22))
-        root.addView(label("JEAXLABS TASK LOCKER", 13f, Color.rgb(222, 211, 255), true).apply { gravity = Gravity.CENTER })
-        root.addView(space(10))
-        root.addView(label("Sessão protegida", 29f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
-        root.addView(space(7))
-        root.addView(label("Este dispositivo está no modo de uso controlado.", 14f, Color.rgb(235, 228, 255)).apply { gravity = Gravity.CENTER })
-        root.addView(space(25))
-        root.addView(button("Desbloquear com PIN", { showPinDialog("Desbloquear Task Locker") { stopKiosk() } }, Color.WHITE, purpleDark, 54, 18))
-        root.addView(label("JeaxLabs OS  ·  1.3.0", 11f, Color.rgb(220, 210, 249)).apply { gravity = Gravity.CENTER })
-        setContentView(root)
+        showLockScreen()
     }
 
     private fun stopKiosk() {
-        try { stopLockTask() } catch (_: Exception) {}
-        prefs.edit().putBoolean("kiosk_enabled", false).apply()
-        kioskStartPending = false
-        showHome()
+        if (dpm.isDeviceOwnerApp(packageName)) {
+            ensureManagedSystemMode()
+            if (!isSystemLockTaskActive()) startManagedLockTask()
+        }
+        showLockScreen()
     }
 
     private fun showStorePage() {
@@ -1574,7 +2003,7 @@ class MainActivity : Activity() {
         val body = pair.second
         body.addView(pageHeader("Atualizações", "Verificação do canal oficial JeaxLabs"))
         val state = card(Color.WHITE, 18, 20)
-        state.addView(label("JeaxLabs OS 1.3.0", 19f, ink, true))
+        state.addView(label("JeaxLabs OS 1.4.0", 19f, ink, true))
         state.addView(label("Versão instalada nesta compilação", 12f, muted))
         state.addView(space(12))
         state.addView(label("Última versão publicada no canal", 13f, muted))
@@ -1613,7 +2042,7 @@ class MainActivity : Activity() {
         hero.addView(mark)
         hero.addView(space(14))
         hero.addView(label("JeaxLabs OS", 25f, Color.WHITE, true))
-        hero.addView(label("Versão de interface 1.3.0", 13f, Color.rgb(230, 222, 255)))
+        hero.addView(label("Versão de interface 1.4.0", 13f, Color.rgb(230, 222, 255)))
         body.addView(hero)
         body.addView(rowButton("▣", "Dispositivo", Build.MANUFACTURER + " " + Build.MODEL, { }))
         body.addView(rowButton("▤", "Android", "Versão " + Build.VERSION.RELEASE + " · SDK " + Build.VERSION.SDK_INT, { }))
@@ -1627,14 +2056,6 @@ class MainActivity : Activity() {
         body.addView(space(12))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
-    }
-
-    private fun openSettings(action: String) {
-        try {
-            startActivity(Intent(action))
-        } catch (_: Exception) {
-            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { toast("Esta tela não está disponível neste Android.") }
-        }
     }
 
     private fun toast(message: String) {

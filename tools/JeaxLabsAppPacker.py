@@ -184,7 +184,7 @@ class AppPacker(tk.Tk):
         title.pack(side="left", fill="x", expand=True)
         tk.Label(title, text="JEAXLABS APP PACKER", font=("Segoe UI", 20, "bold"),
                  fg=WHITE, bg=BG).pack(anchor="w")
-        tk.Label(title, text="APK  →  pacote .jxa criptografado e assinado",
+        tk.Label(title, text="APK  →  .jxa criptografado e assinado para o JeaxLabs OS",
                  font=("Segoe UI", 10), fg=MUTED, bg=BG).pack(anchor="w", pady=(3, 0))
         tk.Label(self, text="CRIPTOGRAFIA AES-256-GCM  •  ASSINATURA ED25519",
                  font=("Segoe UI", 9, "bold"), fg=GREEN, bg=BG).pack(anchor="w", padx=28, pady=(0, 10))
@@ -285,7 +285,7 @@ class AppPacker(tk.Tk):
 
     def _pack_done(self, target, fingerprint, digest):
         self.status.set("Pacote .jxa criado e assinatura local verificada.")
-        messagebox.showinfo("Sucesso", f"Pacote criado:\n{target}\n\nFingerprint do publicador:\n{fingerprint}\nSHA-256 do pacote:\n{digest}\n\nO receptor deve verificar a assinatura e exigir senha de descriptografia.", parent=self)
+        messagebox.showinfo("Sucesso", f"Pacote criado:\n{target}\n\nFingerprint do publicador:\n{fingerprint}\nSHA-256 do pacote:\n{digest}\n\nNo JeaxLabs OS 1.4.1, abra Configurações > Pacotes .jxa, cadastre este fingerprint por um canal independente e use a senha de criptografia informada ao empacotar.", parent=self)
 
     def _pack_error(self, error):
         self.status.set("Falha no empacotamento.")

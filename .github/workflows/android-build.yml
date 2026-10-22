@@ -38,6 +38,9 @@ jobs:
           mkdir -p release-package
           cp android-source/app/build/outputs/apk/debug/app-debug.apk release-package/JeaxLabsOS-v1.4.0-debug.apk
           cp android-source/README.md release-package/README-build.md
+          mkdir -p release-package/tools
+          cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
           cd android-source
           zip -qr ../release-package/JeaxLabsOS-v1.4.0-Source.zip . -x '*/build/*' '.gradle/*'
           cd ..

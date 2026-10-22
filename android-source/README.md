@@ -1,37 +1,34 @@
-# JeaxLabs OS — versão de interface 1.1.0
+# JeaxLabs OS — ROM Simulator 1.2.0
 
-Este repositório contém o aplicativo Android JeaxLabs OS, com uma interface de launcher e telas de sistema para tablets Android.
+Aplikasi Android yang mensimulasikan pengalaman antarmuka sistem JeaxLabs OS sambil pengembangan ROM/fimware berjalan. Target de teste inicial: Samsung Galaxy Tab A7 Lite LTE (SM-T225).
 
-## O que esta versão inclui
+## Telas e recursos
 
-- Tela de inicialização do aplicativo e fluxo de boas-vindas/configuração inicial.
-- Tela inicial com relógio, atalhos e grade de aplicativos instalados.
-- Pesquisa de aplicativos e abertura dos apps disponíveis no dispositivo.
-- Central de controle e configurações que encaminham para os painéis oficiais do Android.
-- Central de notificações que usa o acesso especial opcional do Android, após autorização explícita do usuário.
-- Integração inicial com o catálogo remoto em \`catalog.json\`.
-- Consulta periódica de metadados do canal de atualizações, no máximo uma vez a cada 24 horas quando o aplicativo é aberto.
-- Tela JeaxLabs Task Locker com PIN e integração ao Android Lock Task Mode quando o aplicativo estiver provisionado como Device Owner.
-- Pipeline GitHub Actions para compilar APK e gerar um ZIP com APK e código-fonte.
+- Tela de inicialização JeaxLabs e fluxo de boas-vindas/configuração inicial.
+- Tela de bloqueio simulada com relógio, data, resumo de notificações e desbloqueio por toque/deslize.
+- Tela inicial com papel de parede em degradê inspirado no layout de referência, widget de clima configurável, barra de pesquisa, ícones dos apps realmente instalados, indicadores de página e dock com favoritos detectados no aparelho.
+- Gaveta de aplicativos com pesquisa e abertura de aplicativos instalados.
+- Central de controle com atalhos para Wi-Fi, Bluetooth, tela, som, bateria e notificações; controle de brilho limitado à janela do app.
+- Configurações JeaxLabs e acesso aos painéis reais do Android.
+- Central de notificações opcional, mediante autorização explícita do Notification Access do Android.
+- JeaxLabs Task Locker com PIN e integração ao Lock Task Mode do Android quando o app estiver provisionado como Device Owner.
+- Loja consulta o catálogo de aplicativos remoto; canal de atualizações consulta metadados periodicamente.
 
-## Limites importantes
+## O que é simulado versus nativo
 
-Este projeto ainda é um aplicativo de sistema/launcher, não uma ROM nem uma distribuição Android independente. Um APK normal não substitui a animação de boot do firmware, a tela de recuperação, as Configurações privilegiadas do fabricante ou o painel nativo completo. A tela de inicialização do JeaxLabs só aparece quando o Android inicia este aplicativo.
+O APK simula a interface visual e a navegação do futuro sistema. Ele continua rodando por cima do Android instalado: não é uma ROM/firmware, não substitui a animação de boot original, não controla todos os componentes privilegiados da Samsung e não fornece ainda instalação criptográfica de \`.jxa\` nem atualização transacional de \`.jxu\`. O clima permite guardar o nome da cidade, mas não apresenta previsão real nesta versão. Botões de conexão abrem as configurações nativas porque um APK comum não pode ligar/desligar livremente todas as rádios no Android moderno.
 
-A loja já consulta o catálogo remoto, mas o catálogo atual está vazio. A instalação de pacotes criptografados \`.jxa\`, a verificação criptográfica final de assinaturas e a instalação transacional de atualizações \`.jxu\` ainda precisam de um protocolo final implementado e testado antes de serem anunciadas como prontas.
+O Device Owner/Task Locker precisa de provisionamento e deve ser testado no modelo de tablet e versão de Android específicos. O modo de bloqueio não deve ser tratado como segurança de produção até os testes em dispositivo real.
 
-## Construir
+## Compilação pelo GitHub Actions
 
-O GitHub Actions executa \`gradle assembleDebug\` usando Java 17 e Gradle 8.9. O APK gerado é de depuração, não é assinado para uma publicação de produção.
+O workflow usa Java 17 e Gradle 8.9. Ele gera um APK de depuração e um ZIP contendo APK, fonte e instruções. O APK debug é para teste; para distribuição de produção ainda é necessário configurar assinatura de release segura.
 
-Para provisionar Device Owner, o tablet precisa permitir o provisionamento da aplicação e estar nas condições exigidas pelo Android, geralmente após uma restauração de fábrica e antes de adicionar contas:
+Comando de provisionamento (quando o tablet estiver preparado e o ADB autorizado):
+
 \`\`\`bat
 adb shell dpm set-device-owner br.com.jeaxlabs.os/.JeaxDeviceAdminReceiver
-\`\`\`
-
-Confirme com:
-\`\`\`bat
 adb shell dpm list-owners
 \`\`\`
 
-O modo bloqueado deve ser testado no modelo e versão específicos do Android antes de uso real.
+A primeira configuração do sistema precisa ser concluída uma vez; depois o lançamento do JeaxLabs pode mostrar a tela de bloqueio simulada para demonstrar o fluxo de boot/desbloqueio.

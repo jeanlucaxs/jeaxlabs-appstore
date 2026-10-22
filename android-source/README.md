@@ -1,12 +1,12 @@
 # JeaxLabs OS — documentação técnica
 
-A versão e o código Android são definidos no arquivo raiz `version.properties`. O aparelho-alvo inicial é o Samsung Galaxy Tab A7 Lite LTE (SM-T225).
+A versão e o código Android são definidos em `version.properties`, na raiz do projeto Android. O aparelho-alvo inicial é o Samsung Galaxy Tab A7 Lite LTE (SM-T225).
 
 ## Páginas internas
 
 - Tela de boot e boas-vindas JeaxLabs.
 - Tela de bloqueio JeaxLabs simulada; ao apagar/acender a tela, a Activity tenta mostrar o bloqueio de novo se ainda estiver viva.
-- Tela inicial, gaveta e busca de aplicativos, fichas de apps simuladas e dock. Os ícones não iniciam APKs externos.
+- Tela inicial, gaveta e busca de aplicativos, fichas de apps simuladas e dock. Os ícones de apps simulados não iniciam APKs externos; pacotes `.jxa` validados são encaminhados ao instalador protegido do Android.
 - Configurações internas: Wi-Fi e conexões, Bluetooth, brilho/suspensão/rotação, volume, bateria, notificações, apps, armazenamento, segurança, diagnóstico ADB e Task Locker.
 - Ao reconhecer Device Owner, o app tenta ativar Lock Task automaticamente, ocultar barras e cortina de notificações, desabilitar keyguard quando permitido, bloquear a desinstalação do próprio app e se tornar launcher HOME persistente.
 - Wi-Fi usa as APIs de gerenciamento de rede conforme o nível de privilégio; Bluetooth usa permissões runtime e requer Device Owner para controle direto de rádio em Android moderno.
@@ -26,7 +26,9 @@ Se um PIN/padrão seguro do Android já estiver configurado, a política setKeyg
 - O repositório de atualizações fornece `tools/JeaxLabsUpdatePacker.py`, que gera `.jxu` com AES-256-GCM e assinatura Ed25519.
 - Para executar as ferramentas, instale Python 3 e rode `py -m pip install cryptography`.
 - Guarde a chave privada fora do GitHub público. O receptor deve confiar no fingerprint por um canal independente.
-- O APK ainda não implementa o instalador/descriptografador dos formatos `.jxa`/`.jxu`.
+- O APK implementa a importação remota de `.jxa`: exige fingerprint Ed25519 confiável definido localmente, verifica assinatura/SHA-256, descriptografa com a senha e entrega o APK validado ao PackageInstaller.
+- Para configurar o fingerprint, acesse Configurações → Pacotes .jxa. Copie o SHA-256 exibido pelo App Packer e confirme-o por um canal independente do pacote.
+- O APK ainda não implementa a validação, descriptografia e instalação de `.jxu`.
 
 ## Versionamento e build oficial
 

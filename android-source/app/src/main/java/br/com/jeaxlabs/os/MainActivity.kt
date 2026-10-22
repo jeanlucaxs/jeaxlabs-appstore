@@ -213,14 +213,14 @@ class MainActivity : Activity() {
 
     private fun pageScroll(padding: Int = 20): Pair<ScrollView, LinearLayout> {
         val root = ScrollView(this).apply {
-            fillViewport = true
-            setBackgroundColor(background)
+            isFillViewport = true
+            setBackgroundColor(this@MainActivity.background)
             isVerticalScrollBarEnabled = false
         }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(padding), dp(padding), dp(padding), dp(24))
-            layoutParams = ScrollView.LayoutParams(-1, -2)
+            layoutParams = FrameLayout.LayoutParams(-1, -2)
         }
         root.addView(body)
         return Pair(root, body)
@@ -464,10 +464,10 @@ class MainActivity : Activity() {
             useDefaultMargins = false
             layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        shortcuts.addView(quickCard("⌁", "Conexões", "Wi-Fi e Bluetooth") { showControlCenter() }, gridParams())
-        shortcuts.addView(quickCard("⚙", "Configurações", "Ajustes do dispositivo") { showSettingsPage() }, gridParams())
-        shortcuts.addView(quickCard("▣", "Task Locker", "Modo controlado") { showTaskLockerPage() }, gridParams())
-        shortcuts.addView(quickCard("♧", "Notificações", "Central de avisos") { showNotificationsPage() }, gridParams())
+        shortcuts.addView(quickCard("⌁", "Conexões", "Wi-Fi e Bluetooth", { showControlCenter() }), gridParams())
+        shortcuts.addView(quickCard("⚙", "Configurações", "Ajustes do dispositivo", { showSettingsPage() }), gridParams())
+        shortcuts.addView(quickCard("▣", "Task Locker", "Modo controlado", { showTaskLockerPage() }), gridParams())
+        shortcuts.addView(quickCard("♧", "Notificações", "Central de avisos", { showNotificationsPage() }), gridParams())
         body.addView(shortcuts)
 
         section(body, "JeaxLabs", "Abrir loja  ›") { showStorePage() }
@@ -586,7 +586,7 @@ class MainActivity : Activity() {
         val search = EditText(this).apply {
             hint = "Pesquisar aplicativos"
             textSize = 15f
-            singleLine = true
+            isSingleLine = true
             setTextColor(ink)
             setHintTextColor(muted)
             setPadding(dp(16), 0, dp(16), 0)

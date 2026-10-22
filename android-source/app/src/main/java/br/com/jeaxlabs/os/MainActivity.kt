@@ -107,8 +107,12 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (prefs.getBoolean("setup_done", false) && !prefs.getBoolean("kiosk_enabled", false)) {
-            sessionUnlocked = true
-            showHome()
+            if (activePage == "lockscreen") {
+                showLockScreen()
+            } else {
+                sessionUnlocked = true
+                showHome()
+            }
         }
     }
 

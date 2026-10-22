@@ -45,9 +45,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           UPDATES_REPO_TOKEN: ${{ secrets.UPDATES_REPO_TOKEN }}
+          JXU_PACKAGE_PASSWORD: ${{ secrets.JXU_PACKAGE_PASSWORD }}
+          JXU_PUBLISHER_KEY_BASE64: ${{ secrets.JXU_PUBLISHER_KEY_BASE64 }}
+          JXU_PUBLISHER_KEY_PASSWORD: ${{ secrets.JXU_PUBLISHER_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD UPDATES_REPO_TOKEN; do
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD UPDATES_REPO_TOKEN JXU_PACKAGE_PASSWORD JXU_PUBLISHER_KEY_BASE64 JXU_PUBLISHER_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then
               echo "Missing GitHub Actions secret: $name"
               exit 1
@@ -56,6 +59,12 @@ jobs:
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jeaxlabs-release.keystore"
           test -s "$RUNNER_TEMP/jeaxlabs-release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/jeaxlabs-release.keystore" >> "$GITHUB_ENV"
+          echo "$JXU_PUBLISHER_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/jeaxlabs-publisher.pem"
+          test -s "$RUNNER_TEMP/jeaxlabs-publisher.pem"
+          echo "JXU_PUBLISHER_KEY_PATH=$RUNNER_TEMP/jeaxlabs-publisher.pem" >> "$GITHUB_ENV"
+          PREVIOUS_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -Fxv "$GITHUB_REF_NAME" | head -n 1 || true)"
+          if [ -n "$PREVIOUS_TAG" ]; then MINIMUM_VERSION="${PREVIOUS_TAG#v}"; else MINIMUM_VERSION="1.4.0"; fi
+          echo "MINIMUM_VERSION=$MINIMUM_VERSION" >> "$GITHUB_ENV"
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -65,6 +74,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Set up Python for encrypted update package
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install update package crypto dependency
+        run: python -m pip install --upgrade cryptography
       - name: Verify update repository token
         env:
           GH_TOKEN: ${{ secrets.UPDATES_REPO_TOKEN }}
@@ -79,10 +94,15 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
       - name: Verify signature and prepare official assets
         shell: bash
+        env:
+          JXU_PACKAGE_PASSWORD: ${{ secrets.JXU_PACKAGE_PASSWORD }}
+          JXU_PUBLISHER_KEY_PASSWORD: ${{ secrets.JXU_PUBLISHER_KEY_PASSWORD }}
+          JXU_PUBLISHER_KEY_PATH: ${{ runner.temp }}/jeaxlabs-publisher.pem
         run: |
           set -euo pipefail
           APK_SOURCE="android-source/app/build/outputs/apk/release/app-release.apk"
           APK_NAME="JeaxLabsOS-v${VERSION_NAME}.apk"
+          JXU_NAME="JeaxLabsOS-v${VERSION_NAME}.jxu"
           cp "$APK_SOURCE" "$APK_NAME"
           APK_SIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
@@ -94,18 +114,31 @@ jobs:
           cp CHANGELOG.md release-package/CHANGELOG.md
           cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
           curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o release-package/tools/JeaxLabsJxuCli.py
           cd android-source
           zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source.zip" . -x '*/build/*' '.gradle/*'
           cd ..
           awk -v version="$VERSION_NAME" '$0 ~ "^## \\[" version "\\]" { active=1; print; next } /^## \\[/ { if (active) exit } active { print }' CHANGELOG.md > release-package/release-notes.md
           test -s release-package/release-notes.md
           cp release-package/release-notes.md "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md"
-          cp "JeaxLabsOS-v${VERSION_NAME}.apk" release-package/
-          (cd release-package && sha256sum "JeaxLabsOS-v${VERSION_NAME}.apk" > "JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt")
+          python release-package/tools/JeaxLabsJxuCli.py \
+            --apk "$APK_NAME" \
+            --output "$JXU_NAME" \
+            --version "$VERSION_NAME" \
+            --version-code "$VERSION_CODE" \
+            --minimum-version "$MINIMUM_VERSION" \
+            --notes-file "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md" \
+            --package-password "$JXU_PACKAGE_PASSWORD" \
+            --key-path "$JXU_PUBLISHER_KEY_PATH" \
+            --key-password "$JXU_PUBLISHER_KEY_PASSWORD"
+          cp "$JXU_NAME" release-package/
+          (cd release-package && sha256sum "JeaxLabsOS-v${VERSION_NAME}.apk" "JeaxLabsOS-v${VERSION_NAME}.jxu" > "JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt")
           cp release-package/"JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt" .
           (cd release-package && zip -qr "../JeaxLabsOS-v${VERSION_NAME}-Official-Build.zip" .)
           echo "APK_SHA256=$(sha256sum "$APK_NAME" | cut -d ' ' -f1)" >> "$GITHUB_ENV"
           echo "APK_SIZE=$(stat -c '%s' "$APK_NAME")" >> "$GITHUB_ENV"
+          echo "JXU_SHA256=$(sha256sum "$JXU_NAME" | cut -d ' ' -f1)" >> "$GITHUB_ENV"
+          echo "JXU_SIZE_BYTES=$(stat -c '%s' "$JXU_NAME")" >> "$GITHUB_ENV"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -113,6 +146,7 @@ jobs:
           body_path: JeaxLabsOS-${{ github.ref_name }}-Release-Notes.md
           files: |
             JeaxLabsOS-${{ github.ref_name }}.apk
+            JeaxLabsOS-${{ github.ref_name }}.jxu
             JeaxLabsOS-${{ github.ref_name }}-Official-Build.zip
             JeaxLabsOS-${{ github.ref_name }}-Source.zip
             JeaxLabsOS-${{ github.ref_name }}-SHA256SUMS.txt
@@ -126,10 +160,10 @@ jobs:
           jq -n \
             --arg version "$VERSION_NAME" \
             --arg version_code "$VERSION_CODE" \
-            --arg download_url "https://github.com/jeanlucaxs/jeaxlabs-appstore/releases/download/v${VERSION_NAME}/JeaxLabsOS-v${VERSION_NAME}.apk" \
-            --arg sha256 "$APK_SHA256" \
-            --arg size "$APK_SIZE" \
+            --arg download_url "https://github.com/jeanlucaxs/jeaxlabs-appstore/releases/download/v${VERSION_NAME}/JeaxLabsOS-v${VERSION_NAME}.jxu" \
+            --arg sha256 "$JXU_SHA256" \
+            --arg size "$JXU_SIZE_BYTES" \
             --arg published_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg release_notes "$(cat "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md")" \
-            '{event_type:"jeaxlabs_os_official_release",client_payload:{version:$version,version_code:$version_code,download_url:$download_url,sha256:$sha256,size_bytes:$size,published_at:$published_at,release_notes:$release_notes}}' > event.json
+            '{event_type:"jeaxlabs_os_official_release",client_payload:{version:$version,version_code:$version_code,download_url:$download_url,package_type:"system-update",sha256:$sha256,size_bytes:$size,published_at:$published_at,release_notes:$release_notes}}' > event.json
           gh api repos/jeanlucaxs/jeaxlabs-os-updates/dispatches --method POST --input event.json

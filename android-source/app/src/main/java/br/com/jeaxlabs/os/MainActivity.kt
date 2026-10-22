@@ -346,8 +346,14 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         activePage = "home"
-        val pair = pageScroll(20)
+        window.statusBarColor = Color.rgb(75, 137, 210)
+        window.navigationBarColor = Color.rgb(48, 40, 87)
+        window.decorView.systemUiVisibility = 0
+        val pair = pageScroll(22)
         val body = pair.second
+        pair.first.background = gradient(Color.rgb(83, 150, 218), Color.rgb(55, 47, 98))
+        body.setPadding(dp(22), dp(20), dp(22), dp(24))
+
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -358,63 +364,89 @@ class MainActivity : Activity() {
             setPadding(dp(10), 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-        titleBlock.addView(label("JEAXLABS OS", 13f, ink, true))
-        titleBlock.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 12f, muted))
+        titleBlock.addView(label("JEAXLABS OS", 13f, Color.WHITE, true))
+        titleBlock.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 12f, Color.rgb(231, 230, 255)))
         top.addView(titleBlock)
         val control = TextView(this).apply {
             text = "☷"
             textSize = 24f
             gravity = Gravity.CENTER
-            setTextColor(purple)
-            background = rounded(lavender, 16)
+            setTextColor(Color.WHITE)
+            background = rounded(Color.argb(65, 255, 255, 255), 16)
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             setOnClickListener { showControlCenter() }
         }
         top.addView(control)
         body.addView(top)
-        body.addView(space(18))
+        body.addView(space(30))
 
-        val hero = LinearLayout(this).apply {
+        val timeWidget = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(22), dp(22), dp(22))
-            background = gradient(Color.rgb(53, 43, 100), Color.rgb(115, 77, 194), 26)
-            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) }
+            setPadding(dp(4), dp(5), dp(4), dp(7))
+            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(22)
+            }
         }
-        hero.addView(label("SEU DISPOSITIVO, SEU ESPAÇO", 10f, Color.rgb(221, 208, 255), true))
-        hero.addView(space(12))
-        val clock = label(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()), 37f, Color.WHITE, true)
-        hero.addView(clock)
-        hero.addView(label("Tudo no seu lugar.", 22f, Color.WHITE, true))
-        hero.addView(space(5))
-        hero.addView(label("Aplicativos, ajustes e ferramentas em uma interface só.", 13f, Color.rgb(239, 233, 255)))
-        hero.addView(space(17))
-        hero.addView(button("Pesquisar aplicativos  ⌕", { showAppsPage() }, Color.WHITE, purpleDark, 46, 15))
-        body.addView(hero)
+        timeWidget.addView(label("SEU DIA, DO SEU JEITO", 11f, Color.rgb(235, 225, 255), true))
+        timeWidget.addView(space(4))
+        val clock = label(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()), 48f, Color.WHITE, true)
+        timeWidget.addView(clock)
+        timeWidget.addView(label("Seus aplicativos e controles, a um toque.", 14f, Color.rgb(244, 240, 255)))
+        body.addView(timeWidget)
 
-        val quickGrid = GridLayout(this).apply {
+        val searchBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(17), 0, dp(17), 0)
+            background = rounded(Color.WHITE, 28)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(20) }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showAppsPage() }
+        }
+        searchBar.addView(label("⌕", 25f, purple, true))
+        val searchCaption = label("Pesquisar aplicativos", 14f, muted)
+        searchCaption.setPadding(dp(10), 0, 0, 0)
+        searchBar.addView(searchCaption, LinearLayout.LayoutParams(0, -1, 1f))
+        searchBar.addView(label("⌗", 19f, purple))
+        body.addView(searchBar)
+
+        val appTitleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(2), dp(2), dp(8))
+        }
+        appTitleRow.addView(label("Aplicativos", 17f, Color.WHITE, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val allApps = label("Ver todos  ›", 12f, Color.WHITE, true)
+        allApps.setOnClickListener { showAppsPage() }
+        appTitleRow.addView(allApps)
+        body.addView(appTitleRow)
+        addAppGrid(body, cachedApps.take(8), 4, Color.WHITE)
+
+        body.addView(space(12))
+        val shortcuts = GridLayout(this).apply {
             columnCount = 2
             useDefaultMargins = false
             layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        quickGrid.addView(quickCard("▦", "Aplicativos", "Ver todos", { showAppsPage() }), gridParams())
-        quickGrid.addView(quickCard("◉", "Central", "Controles rápidos", { showControlCenter() }), gridParams())
-        quickGrid.addView(quickCard("⚙", "Configurações", "Personalizar", { showSettingsPage() }), gridParams())
-        quickGrid.addView(quickCard("♧", "Notificações", "Central de avisos", { showNotificationsPage() }), gridParams())
-        body.addView(quickGrid)
-        section(body, "Seus aplicativos", "Ver todos  ›") { showAppsPage() }
-        addAppGrid(body, cachedApps.take(8), 4)
-        section(body, "Sistema", "Ver detalhes  ›") { showAboutPage() }
-        val status = card(Color.WHITE, 16, 20)
-        val ownerText = if (dpm.isDeviceOwnerApp(packageName)) "Gerenciamento do dispositivo ativo" else "Interface pronta para configuração"
-        status.addView(label("JeaxLabs OS  •  1.1.0", 14f, ink, true))
-        status.addView(label(ownerText, 12f, muted))
-        status.addView(space(8))
-        status.addView(button("Loja JeaxLabs", { showStorePage() }, lavender, purple, 45, 14))
-        status.addView(button("Atualizações do sistema", { showUpdatesPage() }, lavender, purple, 45, 14))
-        body.addView(status)
-        val footer = label("JEAXLABS  ·  INTERFACE DO SISTEMA", 10f, muted, true)
+        shortcuts.addView(quickCard("⌁", "Conexões", "Wi-Fi e Bluetooth") { showControlCenter() }, gridParams())
+        shortcuts.addView(quickCard("⚙", "Configurações", "Ajustes do dispositivo") { showSettingsPage() }, gridParams())
+        shortcuts.addView(quickCard("▣", "Task Locker", "Modo controlado") { showTaskLockerPage() }, gridParams())
+        shortcuts.addView(quickCard("♧", "Notificações", "Central de avisos") { showNotificationsPage() }, gridParams())
+        body.addView(shortcuts)
+
+        section(body, "JeaxLabs", "Abrir loja  ›") { showStorePage() }
+        val official = card(Color.argb(238, 255, 255, 255), 15, 20)
+        official.addView(label("Loja e atualizações", 15f, ink, true))
+        official.addView(label("Catálogo oficial e canal de versões do JeaxLabs OS.", 12f, muted))
+        official.addView(space(8))
+        official.addView(button("Loja JeaxLabs", { showStorePage() }, lavender, purple, 44, 14))
+        official.addView(button("Atualizações do sistema", { showUpdatesPage() }, lavender, purple, 44, 14))
+        body.addView(official)
+
+        val footer = label("JEAXLABS OS  ·  1.1.0", 10f, Color.rgb(235, 227, 255), true)
         footer.gravity = Gravity.CENTER
-        footer.setPadding(0, dp(12), 0, dp(8))
+        footer.setPadding(0, dp(16), 0, dp(8))
         body.addView(footer)
         setContentView(pair.first)
     }
@@ -456,7 +488,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun addAppGrid(parent: LinearLayout, apps: List<ResolveInfo>, columns: Int) {
+    private fun addAppGrid(parent: LinearLayout, apps: List<ResolveInfo>, columns: Int, nameColor: Int = ink) {
         if (apps.isEmpty()) {
             parent.addView(label("Os aplicativos instalados aparecerão aqui.", 13f, muted))
             return
@@ -481,7 +513,7 @@ class MainActivity : Activity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             }
-            val name = label(info.loadLabel(packageManager).toString(), 11f, ink)
+            val name = label(info.loadLabel(packageManager).toString(), 11f, nameColor)
             name.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             name.maxLines = 2
             name.maxWidth = dp(74)

@@ -10,7 +10,6 @@ import org.bouncycastle.crypto.params.KeyParameter
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -268,6 +267,7 @@ object JxaPackageCrypto {
                                 }
                             }
                         }
+                        else -> throw IllegalArgumentException("Entrada inesperada no pacote .jxa: " + entry.name)
                     }
                     zip.closeEntry()
                 }

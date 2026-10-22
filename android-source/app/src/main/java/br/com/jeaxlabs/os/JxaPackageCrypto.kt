@@ -421,7 +421,7 @@ object JxaPackageCrypto {
     }
 
     private fun isValidVersion(value: String): Boolean =
-        Regex("^\\\\d+\\\\.\\\\d+\\\\.\\\\d+$").matches(value)
+        Regex("^\\d+\\.\\d+\\.\\d+$").matches(value)
 
     private fun compareVersions(left: String, right: String): Int {
         val a = left.split(".").map { it.toIntOrNull() ?: 0 }

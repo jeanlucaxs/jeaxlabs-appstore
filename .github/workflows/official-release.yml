@@ -1,0 +1,136 @@
+name: JeaxLabs OS Official Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  official-release:
+    name: Validate, sign, and publish official version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read and validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' version.properties)"
+          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' version.properties)"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$TAG_VERSION" = "$VERSION_NAME" || { echo "Tag and version.properties do not match."; exit 1; }
+          test -n "$VERSION_CODE" && [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]
+          test "$(jq -r '.release' catalog.json)" = "$VERSION_NAME" || { echo "catalog.json release does not match version.properties."; exit 1; }
+          grep -Eq "^## \[$VERSION_NAME\]" CHANGELOG.md || { echo "CHANGELOG.md needs a section for $VERSION_NAME."; exit 1; }
+          PREVIOUS_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -Fxv "$GITHUB_REF_NAME" | head -n 1 || true)"
+          if [ -n "$PREVIOUS_TAG" ] && git show "$PREVIOUS_TAG:version.properties" >/tmp/previous-version.properties 2>/dev/null; then
+            PREVIOUS_CODE="$(sed -n 's/^VERSION_CODE=//p' /tmp/previous-version.properties)"
+            if [[ "$PREVIOUS_CODE" =~ ^[0-9]+$ ]] && [ "$VERSION_CODE" -le "$PREVIOUS_CODE" ]; then
+              echo "VERSION_CODE must be greater than the previous tagged version ($PREVIOUS_CODE)."
+              exit 1
+            fi
+          fi
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+      - name: Require permanent Android signing key and update token
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          UPDATES_REPO_TOKEN: ${{ secrets.UPDATES_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD UPDATES_REPO_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jeaxlabs-release.keystore"
+          test -s "$RUNNER_TEMP/jeaxlabs-release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/jeaxlabs-release.keystore" >> "$GITHUB_ENV"
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify update repository token
+        env:
+          GH_TOKEN: ${{ secrets.UPDATES_REPO_TOKEN }}
+        run: gh api repos/jeanlucaxs/jeaxlabs-os-updates --jq .full_name
+      - name: Build release APK
+        working-directory: android-source
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon test assembleRelease
+      - name: Verify signature and prepare official assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_SOURCE="android-source/app/build/outputs/apk/release/app-release.apk"
+          APK_NAME="JeaxLabsOS-v${VERSION_NAME}.apk"
+          cp "$APK_SOURCE" "$APK_NAME"
+          APK_SIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
+          "$APK_SIGNER" verify --verbose "$APK_NAME"
+          mkdir -p release-package/tools
+          cp "$APK_NAME" release-package/"$APK_NAME"
+          cp android-source/README.md release-package/README-build.md
+          cp RELEASE_POLICY.md release-package/RELEASE_POLICY.md
+          cp CHANGELOG.md release-package/CHANGELOG.md
+          cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
+          cd android-source
+          zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source.zip" . -x '*/build/*' '.gradle/*'
+          cd ..
+          awk -v version="$VERSION_NAME" '$0 ~ "^## \\[" version "\\]" { active=1; print; next } /^## \\[/ { if (active) exit } active { print }' CHANGELOG.md > release-package/release-notes.md
+          test -s release-package/release-notes.md
+          cp release-package/release-notes.md "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md"
+          cp "JeaxLabsOS-v${VERSION_NAME}.apk" release-package/
+          (cd release-package && sha256sum "JeaxLabsOS-v${VERSION_NAME}.apk" > "JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt")
+          cp release-package/"JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt" .
+          cp release-package/"JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt" release-package/
+          (cd release-package && zip -qr "../JeaxLabsOS-v${VERSION_NAME}-Official-Build.zip" .)
+          echo "APK_SHA256=$(sha256sum "$APK_NAME" | cut -d ' ' -f1)" >> "$GITHUB_ENV"
+          echo "APK_SIZE=$(stat -c '%s' "$APK_NAME")" >> "$GITHUB_ENV"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: JeaxLabs OS v${{ env.VERSION_NAME }} — versão oficial
+          body_path: JeaxLabsOS-v${{ env.VERSION_NAME }}-Release-Notes.md
+          files: |
+            JeaxLabsOS-v${{ env.VERSION_NAME }}.apk
+            JeaxLabsOS-v${{ env.VERSION_NAME }}-Official-Build.zip
+            JeaxLabsOS-v${{ env.VERSION_NAME }}-Source.zip
+            JeaxLabsOS-v${{ env.VERSION_NAME }}-SHA256SUMS.txt
+          fail_on_unmatched_files: true
+      - name: Synchronize the official update manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.UPDATES_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$VERSION_NAME" \
+            --arg version_code "$VERSION_CODE" \
+            --arg download_url "https://github.com/jeanlucaxs/jeaxlabs-appstore/releases/download/v${VERSION_NAME}/JeaxLabsOS-v${VERSION_NAME}.apk" \
+            --arg sha256 "$APK_SHA256" \
+            --arg size "$APK_SIZE" \
+            --arg published_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg release_notes "$(cat "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md")" \
+            '{event_type:"jeaxlabs_os_official_release",client_payload:{version:$version,version_code:$version_code,download_url:$download_url,sha256:$sha256,size_bytes:$size,published_at:$published_at,release_notes:$release_notes}}' > event.json
+          gh api repos/jeanlucaxs/jeaxlabs-os-updates/dispatches --method POST --input event.json

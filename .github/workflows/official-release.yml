@@ -76,7 +76,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle --no-daemon test assembleRelease
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleRelease
       - name: Verify signature and prepare official assets
         shell: bash
         run: |

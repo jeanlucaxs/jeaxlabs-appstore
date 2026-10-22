@@ -1,0 +1,52 @@
+name: Build JeaxLabs OS
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android-source/**'
+      - '.github/workflows/android-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Download official JeaxLabs logo
+        shell: bash
+        run: |
+          mkdir -p android-source/app/src/main/res/drawable-nodpi
+          curl --fail --location --silent --show-error --max-time 30 https://www.jeaxlabs.com.br/logo-full.png -o android-source/app/src/main/res/drawable-nodpi/jeaxlabs_logo.png || echo 'Logo download failed; continuing because the current shell does not require it.'
+      - name: Build debug APK
+        working-directory: android-source
+        run: gradle --no-daemon assembleDebug
+      - name: Package APK and source ZIP
+        shell: bash
+        run: |
+          mkdir -p release-package
+          cp android-source/app/build/outputs/apk/debug/app-debug.apk release-package/JeaxLabsOS-v1.0.0-debug.apk
+          cp android-source/README.md release-package/README-build.md
+          cd android-source
+          zip -qr ../release-package/JeaxLabsOS-v1.0.0-Source.zip . -x '*/build/*' '.gradle/*'
+          cd ..
+          cd release-package
+          zip -qr ../JeaxLabsOS-v1.0.0-Build.zip .
+      - name: Upload downloadable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: JeaxLabsOS-v1.0.0-Build
+          path: JeaxLabsOS-v1.0.0-Build.zip
+          if-no-files-found: error
+          retention-days: 90

@@ -1,6 +1,6 @@
 # JeaxLabs OS e App Store
 
-Este repositório contém o aplicativo JeaxLabs OS, o catálogo da loja e a automação de compilação/publicação. A versão Android única é definida por `version.properties`.
+Este repositório contém o aplicativo JeaxLabs OS, o catálogo da loja e a automação de compilação/publicação. A versão Android única é definida por `android-source/version.properties`.
 
 ## Política de versões
 
@@ -8,7 +8,7 @@ Toda versão numerada distribuída do JeaxLabs OS deve ser oficial: sem publica�
 
 - Política completa: [RELEASE_POLICY.md](RELEASE_POLICY.md)
 - Histórico de alterações: [CHANGELOG.md](CHANGELOG.md)
-- Versão e versionCode: [version.properties](version.properties)
+- Versão e versionCode: [version.properties](android-source/version.properties)
 - Catálogo público: [catalog.json](catalog.json)
 
 ## Como uma versão oficial é publicada

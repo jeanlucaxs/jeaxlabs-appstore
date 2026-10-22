@@ -2026,6 +2026,29 @@ class MainActivity : Activity() {
         installSecurePackageFromUrl(packageUrl, packagePassword, "JXA")
     }
 
+    private fun promptForJxuUrl() {
+        val input = EditText(this).apply {
+            hint = "https://servidor/JeaxLabsOS-1.4.1.jxu"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            singleLine = true
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Aplicar atualização .jxu")
+            .setMessage("Informe a URL HTTPS direta do pacote que contém o novo APK do JeaxLabs OS.")
+            .setView(input)
+            .setPositiveButton("Continuar") { _, _ ->
+                val url = input.text.toString().trim()
+                val path = url.substringBefore("?").substringBefore("#")
+                if (!url.startsWith("https://", true) || !path.endsWith(".jxu", true)) {
+                    toast("Informe uma URL HTTPS terminada em .jxu.")
+                } else {
+                    promptForJxuInstall(url, "Atualização", "Pacote de atualização do JeaxLabs OS.")
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun promptForJxuInstall(packageUrl: String, version: String, notes: String) {
         if (prefs.getString("jxa_trusted_fingerprint", "").isNullOrBlank()) {
             AlertDialog.Builder(this)
@@ -2258,6 +2281,7 @@ class MainActivity : Activity() {
         }
         state.addView(label("A verificação do canal ocorre automaticamente no máximo uma vez a cada 24 horas. Um .jxu validado contém o novo APK do sistema e solicita ao Android a substituição da versão instalada.", 12f, muted))
         body.addView(state)
+        body.addView(button("Aplicar pacote .jxu por URL", { promptForJxuUrl() }, lavender, purple))
         body.addView(button("Verificar novamente agora", {
             prefs.edit().putLong("last_update_check", 0L).apply()
             checkForUpdatesIfDue()

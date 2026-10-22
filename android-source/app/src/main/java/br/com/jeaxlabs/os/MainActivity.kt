@@ -291,6 +291,12 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun currentVersionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "—"
+    } catch (_: Exception) {
+        "—"
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun rounded(color: Int, radius: Int, stroke: Int = 0): GradientDrawable =
@@ -534,7 +540,7 @@ class MainActivity : Activity() {
         root.addView(label("Conheça o JeaxLabs OS: uma interface feita para reunir seus aplicativos, controles e ferramentas em um só lugar.", 16f, Color.rgb(236, 230, 255)))
         root.addView(space(28))
         root.addView(button("Começar configuração  →", { showSetup() }, Color.WHITE, purpleDark, 58, 20))
-        root.addView(label("JeaxLabs OS  •  versão 1.4.0", 12f, Color.rgb(222, 213, 248)).apply {
+        root.addView(label("JeaxLabs OS  •  versão " + currentVersionName(), 12f, Color.rgb(222, 213, 248)).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         })
@@ -1655,7 +1661,7 @@ class MainActivity : Activity() {
         body.addView(space(17))
         val status = card(Color.WHITE, 17, 22)
         status.addView(label("Controle do dispositivo", 17f, ink, true))
-        status.addView(label(getBatteryDescription() + "  ·  JeaxLabs OS 1.4.0", 12f, muted))
+        status.addView(label(getBatteryDescription() + "  ·  JeaxLabs OS " + currentVersionName(), 12f, muted))
         body.addView(status)
 
         section(body, "Conexões e recursos")
@@ -2186,7 +2192,7 @@ class MainActivity : Activity() {
         val body = pair.second
         body.addView(pageHeader("Atualizações", "Verificação do canal oficial JeaxLabs"))
         val state = card(Color.WHITE, 18, 20)
-        state.addView(label("JeaxLabs OS 1.4.0", 19f, ink, true))
+        state.addView(label("JeaxLabs OS " + currentVersionName(), 19f, ink, true))
         state.addView(label("Versão instalada nesta compilação", 12f, muted))
         state.addView(space(12))
         state.addView(label("Última versão publicada no canal", 13f, muted))
@@ -2225,7 +2231,7 @@ class MainActivity : Activity() {
         hero.addView(mark)
         hero.addView(space(14))
         hero.addView(label("JeaxLabs OS", 25f, Color.WHITE, true))
-        hero.addView(label("Versão de interface 1.4.0", 13f, Color.rgb(230, 222, 255)))
+        hero.addView(label("Versão de interface " + currentVersionName(), 13f, Color.rgb(230, 222, 255)))
         body.addView(hero)
         body.addView(rowButton("▣", "Dispositivo", Build.MANUFACTURER + " " + Build.MODEL, { }))
         body.addView(rowButton("▤", "Android", "Versão " + Build.VERSION.RELEASE + " · SDK " + Build.VERSION.SDK_INT, { }))

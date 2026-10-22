@@ -72,7 +72,7 @@ jobs:
       - name: Build release APK
         working-directory: android-source
         env:
-          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/jeaxlabs-release.keystore
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -103,7 +103,6 @@ jobs:
           cp "JeaxLabsOS-v${VERSION_NAME}.apk" release-package/
           (cd release-package && sha256sum "JeaxLabsOS-v${VERSION_NAME}.apk" > "JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt")
           cp release-package/"JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt" .
-          cp release-package/"JeaxLabsOS-v${VERSION_NAME}-SHA256SUMS.txt" release-package/
           (cd release-package && zip -qr "../JeaxLabsOS-v${VERSION_NAME}-Official-Build.zip" .)
           echo "APK_SHA256=$(sha256sum "$APK_NAME" | cut -d ' ' -f1)" >> "$GITHUB_ENV"
           echo "APK_SIZE=$(stat -c '%s' "$APK_NAME")" >> "$GITHUB_ENV"

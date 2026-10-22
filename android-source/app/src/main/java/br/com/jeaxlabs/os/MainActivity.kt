@@ -95,7 +95,7 @@ class MainActivity : Activity() {
             return
         }
         when (activePage) {
-            "home" -> super.onBackPressed()
+            "home" -> { }
             "welcome" -> showWelcome()
             else -> showHome()
         }
@@ -363,6 +363,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede", { openSettings(Settings.ACTION_WIFI_SETTINGS) }))
         body.addView(rowButton("◐", "Tela e aparência", "Brilho, tamanho e rotação da tela", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
         body.addView(rowButton("♢", "Notificações", "Ative o acesso para exibi-las no JeaxLabs OS", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
+        body.addView(rowButton("⌂", "Tela inicial padrão", "Selecione o JeaxLabs OS como launcher", { openSettings(Settings.ACTION_HOME_SETTINGS) }))
         body.addView(space(8))
         body.addView(button("Finalizar configuração", {
             prefs.edit().putBoolean("setup_done", true).apply()

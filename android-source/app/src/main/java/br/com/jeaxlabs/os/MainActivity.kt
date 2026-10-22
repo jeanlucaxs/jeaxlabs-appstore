@@ -34,6 +34,7 @@ import android.os.Looper
 import android.os.Environment
 import android.os.StatFs
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -1722,6 +1723,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("▤", "Bateria e energia", getBatteryDescription(), { showBatteryPage() }))
         body.addView(rowButton("♧", "Notificações", "Central interna de avisos", { showNotificationsPage() }))
         body.addView(rowButton("▣", "Aplicativos instalados", "Grade e fichas simuladas", { showAppsManagementPage() }))
+        body.addView(rowButton("🔐", "Pacotes .jxa", "Validar assinatura, descriptografar e instalar", { showJxaPackagesPage() }))
         body.addView(rowButton("▰", "Armazenamento", "Uso de armazenamento", { showStoragePage() }))
         body.addView(rowButton("◇", "Segurança e bloqueio", "Device Owner, keyguard e Task Lock", { showSecurityPage() }))
         body.addView(rowButton("⌘", "Opções de desenvolvimento", "Status ADB e permissões", { showDeveloperPage() }))
@@ -1944,11 +1946,20 @@ class MainActivity : Activity() {
                             appCard.addView(label("Versão " + app.optString("version", "—"), 12f, purple))
                             appCard.addView(label(app.optString("description", ""), 12f, muted))
                             val packageUrl = app.optString("url", app.optString("package_url", ""))
-                            if (packageUrl.startsWith("https://")) appCard.addView(button("Baixar pacote", { downloadPackage(packageUrl, app.optString("name", "JeaxLabs-App")) }, purple, Color.WHITE, 43, 13))
+                            val packageName = app.optString("name", "JeaxLabs-App")
+                            val isJxa = packageUrl.substringBefore("?").substringBefore("#").endsWith(".jxa", true)
+                            if (packageUrl.startsWith("https://") && isJxa) {
+                                appCard.addView(button("Verificar e instalar .jxa", {
+                                    promptForJxaInstall(packageUrl, packageName)
+                                }, purple, Color.WHITE, 43, 13))
+                            } else if (packageUrl.startsWith("https://")) {
+                                appCard.addView(button("Baixar pacote", { downloadPackage(packageUrl, packageName) }, purple, Color.WHITE, 43, 13))
+                            }
                             state.addView(appCard)
                         }
                     }
-                    state.addView(label("A instalação criptografada .jxa e a verificação de assinatura ainda exigem o protocolo final de pacotes.", 11f, muted))
+                    state.addView(label("Pacotes .jxa compatíveis são verificados com fingerprint confiável, assinatura Ed25519, SHA-256 e senha AES-256-GCM antes da instalação.", 11f, muted))
+                    state.addView(button("Gerenciar pacotes .jxa", { showJxaPackagesPage() }, lavender, purple, 43, 13))
                 }
             }
         }

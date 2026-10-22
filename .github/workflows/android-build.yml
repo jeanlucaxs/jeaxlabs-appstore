@@ -36,17 +36,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-package
-          cp android-source/app/build/outputs/apk/debug/app-debug.apk release-package/JeaxLabsOS-v1.0.0-debug.apk
+          cp android-source/app/build/outputs/apk/debug/app-debug.apk release-package/JeaxLabsOS-v1.1.0-debug.apk
           cp android-source/README.md release-package/README-build.md
           cd android-source
-          zip -qr ../release-package/JeaxLabsOS-v1.0.0-Source.zip . -x '*/build/*' '.gradle/*'
+          zip -qr ../release-package/JeaxLabsOS-v1.1.0-Source.zip . -x '*/build/*' '.gradle/*'
           cd ..
           cd release-package
-          zip -qr ../JeaxLabsOS-v1.0.0-Build.zip .
+          zip -qr ../JeaxLabsOS-v1.1.0-Build.zip .
       - name: Upload downloadable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: JeaxLabsOS-v1.0.0-Build
-          path: JeaxLabsOS-v1.0.0-Build.zip
+          name: JeaxLabsOS-v1.1.0-Build
+          path: JeaxLabsOS-v1.1.0-Build.zip
           if-no-files-found: error
           retention-days: 90

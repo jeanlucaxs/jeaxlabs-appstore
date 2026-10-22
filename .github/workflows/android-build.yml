@@ -48,6 +48,15 @@ jobs:
         run: |
           mkdir -p android-source/app/src/main/res/drawable-nodpi
           curl --fail --location --silent --show-error --max-time 30 https://www.jeaxlabs.com.br/logo-full.png -o android-source/app/src/main/res/drawable-nodpi/jeaxlabs_logo.png || echo 'Logo download failed; continuing because the current shell does not require it.'
+      - name: Check packer Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packer-check
+          cp tools/JeaxLabsAppPacker.py packer-check/
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o packer-check/JeaxLabsUpdatePacker.py
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o packer-check/JeaxLabsJxuCli.py
+          python -m py_compile packer-check/JeaxLabsAppPacker.py packer-check/JeaxLabsUpdatePacker.py packer-check/JeaxLabsJxuCli.py
       - name: Compile CI APK
         working-directory: android-source
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug

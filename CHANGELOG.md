@@ -4,10 +4,11 @@ Notas de versões numeradas e publicadas. Descrever apenas recursos incluídos e
 
 ## [1.4.1] - 2026-10-22
 
-- Integrado ao APK o importador de pacotes `.jxa` por URL HTTPS.
-- Adicionada verificação Ed25519 do manifesto e do fingerprint confiável, validação SHA-256 do conteúdo e descriptografia AES-256-GCM com PBKDF2-HMAC-SHA256 compatível com o App Packer.
-- Após a validação, o APK descriptografado é enviado ao PackageInstaller do Android; a instalação silenciosa só é tentada quando o modo Device Owner permite, e o sistema pode exigir confirmação.
-- O funcionamento no tablet físico e a instalação real ainda precisam ser validados em dispositivo.
+- Integrado ao APK o importador de pacotes `.jxa` por HTTPS, com validação de fingerprint Ed25519, assinatura, SHA-256 e senha AES-256-GCM.
+- Integrado o formato `.jxu` para atualização do próprio JeaxLabs OS: o pacote contém o novo APK cifrado, a versão, o versionCode, a versão mínima exigida e as notas da atualização.
+- A atualização só é encaminhada ao PackageInstaller depois da verificação criptográfica e da confirmação de que o APK é o pacote `br.com.jeaxlabs.os`, com a versão e o versionCode declarados.
+- O Android pode exigir confirmação; a substituição só funciona se o APK novo tiver o mesmo certificado de assinatura da instalação atual e um versionCode maior.
+- O workflow de release foi preparado para publicar o APK e seu `.jxu`, além de sincronizar o manifesto de atualizações. A compilação final e a instalação no tablet físico ainda precisam ser confirmadas.
 
 
 ## [1.4.0] - 2026-10-22

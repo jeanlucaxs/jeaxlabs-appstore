@@ -1883,6 +1883,177 @@ class MainActivity : Activity() {
         showLockScreen()
     }
 
+
+    private fun showJxaPackagesPage() {
+        setBars(false)
+        activePage = "jxa_packages"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Pacotes .jxa", "Verificação criptográfica e instalação"))
+
+        val securityCard = card(purpleDark, 18, 22)
+        securityCard.addView(label("JEAXLABS PACKAGE SECURITY", 10f, Color.rgb(222, 211, 255), true))
+        securityCard.addView(space(7))
+        securityCard.addView(label("O pacote só é aceito após validar o publicador, a assinatura, o conteúdo e a senha.", 16f, Color.WHITE, true))
+        securityCard.addView(label("AES-256-GCM · PBKDF2-SHA256 · Ed25519 · SHA-256", 11f, Color.rgb(232, 224, 255)))
+        body.addView(securityCard)
+
+        val fingerprint = prefs.getString("jxa_trusted_fingerprint", "").orEmpty()
+        val trustCard = card(Color.WHITE, 16, 18)
+        trustCard.addView(label("Publicador confiável", 16f, ink, true))
+        trustCard.addView(label(
+            if (fingerprint.isBlank()) "Nenhum fingerprint configurado. Configure usando o SHA-256 exibido pelo App Packer, obtido por um canal independente do pacote."
+            else "Fingerprint salvo: " + fingerprint,
+            12f,
+            if (fingerprint.isBlank()) Color.rgb(175, 94, 30) else teal
+        ))
+        trustCard.addView(space(8))
+        trustCard.addView(button("Configurar fingerprint confiável", { showJxaFingerprintDialog() }, lavender, purple, 46, 14))
+        body.addView(trustCard)
+
+        val packageCard = card(Color.WHITE, 16, 18)
+        packageCard.addView(label("Instalar pacote remoto", 16f, ink, true))
+        packageCard.addView(space(4))
+        packageCard.addView(label("Cole a URL HTTPS direta de um arquivo .jxa. A senha de criptografia é a definida no App Packer.", 12f, muted))
+        val urlInput = EditText(this).apply {
+            hint = "https://servidor/aplicativo.jxa"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            singleLine = true
+            setTextColor(ink)
+            setHintTextColor(muted)
+            setPadding(dp(13), dp(8), dp(13), dp(8))
+            background = rounded(Color.WHITE, 12, lavender)
+        }
+        packageCard.addView(urlInput, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(12); bottomMargin = dp(10) })
+        val passwordInput = EditText(this).apply {
+            hint = "Senha de criptografia do .jxa"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            singleLine = true
+            setTextColor(ink)
+            setHintTextColor(muted)
+            setPadding(dp(13), dp(8), dp(13), dp(8))
+            background = rounded(Color.WHITE, 12, lavender)
+        }
+        packageCard.addView(passwordInput, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
+        packageCard.addView(button("Validar, descriptografar e instalar", {
+            val url = urlInput.text.toString().trim()
+            val password = passwordInput.text.toString()
+            if (!url.startsWith("https://", true)) {
+                toast("Informe uma URL HTTPS direta para o arquivo .jxa.")
+            } else if (password.isBlank()) {
+                toast("Digite a senha de criptografia do pacote.")
+            } else if (prefs.getString("jxa_trusted_fingerprint", "").isNullOrBlank()) {
+                toast("Configure primeiro o fingerprint confiável do publicador.")
+                showJxaFingerprintDialog()
+            } else {
+                installJxaFromUrl(url, password)
+            }
+        }))
+        body.addView(packageCard)
+        body.addView(label("A instalação sem confirmação só é tentada quando o Android permite o modo Device Owner. Fora desse modo, o sistema pode exigir sua confirmação de instalação.", 12f, muted))
+        body.addView(space(8))
+        body.addView(button("Voltar às configurações", { showSettingsPage() }, lavender, purple))
+        body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showJxaFingerprintDialog() {
+        val input = EditText(this).apply {
+            hint = "64 caracteres hexadecimais"
+            inputType = InputType.TYPE_CLASS_TEXT
+            singleLine = true
+            setText(prefs.getString("jxa_trusted_fingerprint", "").orEmpty())
+            setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Fingerprint do publicador")
+            .setMessage("No App Packer, copie o fingerprint SHA-256 do certificado Ed25519. Obtenha e confira esse valor por um canal independente do arquivo .jxa. Uma chave incluída no próprio pacote não prova a identidade do publicador.")
+            .setView(input)
+            .setPositiveButton("Salvar") { _, _ ->
+                val normalized = input.text.toString()
+                    .replace(":", "")
+                    .replace(" ", "")
+                    .trim()
+                    .lowercase(Locale.ROOT)
+                if (!Regex("^[a-f0-9]{64}$").matches(normalized)) {
+                    toast("Fingerprint inválido: informe exatamente 64 caracteres hexadecimais.")
+                } else {
+                    prefs.edit().putString("jxa_trusted_fingerprint", normalized).apply()
+                    toast("Fingerprint confiável salvo neste dispositivo.")
+                    showJxaPackagesPage()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun promptForJxaInstall(packageUrl: String, suggestedName: String) {
+        if (prefs.getString("jxa_trusted_fingerprint", "").isNullOrBlank()) {
+            AlertDialog.Builder(this)
+                .setTitle("Configurar segurança JXA")
+                .setMessage("Antes de instalar, configure o fingerprint SHA-256 confiável do publicador. Ele precisa ser obtido fora do próprio pacote.")
+                .setPositiveButton("Configurar") { _, _ -> showJxaFingerprintDialog() }
+                .setNeutralButton("Abrir gerenciador") { _, _ -> showJxaPackagesPage() }
+                .setNegativeButton("Cancelar", null)
+                .show()
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "Senha de criptografia do pacote"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            singleLine = true
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Instalar " + suggestedName)
+            .setMessage("O pacote será baixado, a assinatura verificada e o APK descriptografado apenas se o fingerprint confiável corresponder.")
+            .setView(input)
+            .setPositiveButton("Verificar e instalar") { _, _ ->
+                val password = input.text.toString()
+                if (password.isBlank()) toast("Digite a senha do pacote .jxa.")
+                else installJxaFromUrl(packageUrl, password)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun installJxaFromUrl(packageUrl: String, packagePassword: String) {
+        val trustedFingerprint = prefs.getString("jxa_trusted_fingerprint", "").orEmpty()
+        if (trustedFingerprint.isBlank()) {
+            toast("Configure o fingerprint confiável do publicador antes de instalar.")
+            return
+        }
+        if (!packageUrl.startsWith("https://", true)) {
+            toast("Por segurança, os pacotes .jxa só podem ser baixados por HTTPS.")
+            return
+        }
+        toast("Baixando e validando o pacote .jxa…")
+        thread {
+            try {
+                val verified = JxaPackageCrypto.downloadAndDecrypt(
+                    this@MainActivity,
+                    packageUrl,
+                    packagePassword,
+                    trustedFingerprint
+                )
+                try {
+                    JxaPackageInstaller.install(
+                        this@MainActivity,
+                        verified,
+                        dpm.isDeviceOwnerApp(packageName)
+                    )
+                    handler.post {
+                        toast("Pacote validado: " + verified.appName + " · v" + verified.version + ". Solicitação enviada ao instalador Android.")
+                    }
+                } finally {
+                    verified.apkFile.delete()
+                }
+            } catch (error: Exception) {
+                val detail = error.message?.take(220) ?: "Erro desconhecido."
+                handler.post { toast("Pacote .jxa recusado: " + detail) }
+            }
+        }
+    }
+
     private fun showStorePage() {
         setBars(false)
         activePage = "store"

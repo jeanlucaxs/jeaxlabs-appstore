@@ -140,7 +140,7 @@ class MainActivity : Activity() {
         }
         try {
             if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_EXPORTED)
             } else {
                 @Suppress("DEPRECATION")
                 registerReceiver(bluetoothReceiver, filter)

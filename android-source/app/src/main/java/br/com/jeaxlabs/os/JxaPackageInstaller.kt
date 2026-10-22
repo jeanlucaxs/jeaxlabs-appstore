@@ -11,6 +11,16 @@ import java.io.FileInputStream
 
 object JxaPackageInstaller {
     fun install(context: Context, verified: VerifiedJxaPackage, deviceOwner: Boolean) {
+        if (verified.packageFormat == "JXU") {
+            require(verified.targetPackage == context.packageName) {
+                "A atualização .jxu não é destinada ao aplicativo instalado."
+            }
+            val installed = context.packageManager.getPackageInfo(context.packageName, 0)
+            val installedCode = if (Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
+            require(verified.versionCode > installedCode) {
+                "A atualização .jxu precisa ter um versionCode maior que o instalado."
+            }
+        }
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         if (Build.VERSION.SDK_INT >= 31) {
@@ -32,6 +42,7 @@ object JxaPackageInstaller {
                     .setAction("br.com.jeaxlabs.os.JXA_INSTALL_STATUS")
                     .putExtra("app_name", verified.appName)
                     .putExtra("app_version", verified.version)
+                    .putExtra("package_format", verified.packageFormat)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                     if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
                 val callback = PendingIntent.getBroadcast(context, sessionId, resultIntent, flags)

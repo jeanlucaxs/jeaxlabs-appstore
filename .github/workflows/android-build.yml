@@ -1,9 +1,17 @@
-name: Build JeaxLabs OS
+name: JeaxLabs OS CI
 on:
   push:
     branches: [main]
     paths:
       - 'android-source/**'
+      - 'tools/JeaxLabsAppPacker.py'
+      - 'version.properties'
+      - '.github/workflows/android-build.yml'
+  pull_request:
+    paths:
+      - 'android-source/**'
+      - 'tools/JeaxLabsAppPacker.py'
+      - 'version.properties'
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
 permissions:
@@ -15,6 +23,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Read central version
+        shell: bash
+        run: |
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' version.properties)"
+          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' version.properties)"
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -24,32 +41,32 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Download official JeaxLabs logo
+      - name: Download JeaxLabs logo
         shell: bash
         run: |
           mkdir -p android-source/app/src/main/res/drawable-nodpi
           curl --fail --location --silent --show-error --max-time 30 https://www.jeaxlabs.com.br/logo-full.png -o android-source/app/src/main/res/drawable-nodpi/jeaxlabs_logo.png || echo 'Logo download failed; continuing because the current shell does not require it.'
-      - name: Build debug APK
+      - name: Compile CI APK
         working-directory: android-source
-        run: gradle --no-daemon assembleDebug
-      - name: Package APK and source ZIP
+        run: gradle --no-daemon test assembleDebug
+      - name: Package CI APK, source, and tools
         shell: bash
         run: |
-          mkdir -p release-package
-          cp android-source/app/build/outputs/apk/debug/app-debug.apk release-package/JeaxLabsOS-v1.4.0-debug.apk
-          cp android-source/README.md release-package/README-build.md
           mkdir -p release-package/tools
+          cp "android-source/app/build/outputs/apk/debug/app-debug.apk" "release-package/JeaxLabsOS-v${VERSION_NAME}-debug-CI.apk"
+          cp android-source/README.md release-package/README-build.md
+          cp RELEASE_POLICY.md release-package/RELEASE_POLICY.md
+          cp CHANGELOG.md release-package/CHANGELOG.md
           cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
           curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
           cd android-source
-          zip -qr ../release-package/JeaxLabsOS-v1.4.0-Source.zip . -x '*/build/*' '.gradle/*'
-          cd ..
-          cd release-package
-          zip -qr ../JeaxLabsOS-v1.4.0-Build.zip .
-      - name: Upload downloadable ZIP
+          zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source-CI.zip" . -x '*/build/*' '.gradle/*'
+          cd ../release-package
+          zip -qr "../JeaxLabsOS-v${VERSION_NAME}-CI-Build.zip" .
+      - name: Upload CI artifact (not an official release)
         uses: actions/upload-artifact@v4
         with:
-          name: JeaxLabsOS-v1.4.0-Build
-          path: JeaxLabsOS-v1.4.0-Build.zip
+          name: JeaxLabsOS-v${{ env.VERSION_NAME }}-CI
+          path: JeaxLabsOS-v${{ env.VERSION_NAME }}-CI-Build.zip
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30

@@ -61,6 +61,7 @@ jobs:
           cp CHANGELOG.md release-package/CHANGELOG.md
           cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
           curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
+          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o release-package/tools/JeaxLabsJxuCli.py
           cd android-source
           zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source-CI.zip" . -x '*/build/*' '.gradle/*'
           cd ../release-package

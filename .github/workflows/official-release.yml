@@ -109,13 +109,13 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: JeaxLabs OS v${{ env.VERSION_NAME }} — versão oficial
-          body_path: JeaxLabsOS-v${{ env.VERSION_NAME }}-Release-Notes.md
+          name: JeaxLabs OS ${{ github.ref_name }} — versão oficial
+          body_path: JeaxLabsOS-${{ github.ref_name }}-Release-Notes.md
           files: |
-            JeaxLabsOS-v${{ env.VERSION_NAME }}.apk
-            JeaxLabsOS-v${{ env.VERSION_NAME }}-Official-Build.zip
-            JeaxLabsOS-v${{ env.VERSION_NAME }}-Source.zip
-            JeaxLabsOS-v${{ env.VERSION_NAME }}-SHA256SUMS.txt
+            JeaxLabsOS-${{ github.ref_name }}.apk
+            JeaxLabsOS-${{ github.ref_name }}-Official-Build.zip
+            JeaxLabsOS-${{ github.ref_name }}-Source.zip
+            JeaxLabsOS-${{ github.ref_name }}-SHA256SUMS.txt
           fail_on_unmatched_files: true
       - name: Synchronize the official update manifest
         shell: bash

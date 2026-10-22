@@ -11,7 +11,8 @@ class JxaInstallStatusReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_SUCCESS -> {
-                Toast.makeText(context, "Instalação do pacote .jxa concluída.", Toast.LENGTH_LONG).show()
+                val format = intent.getStringExtra("package_format") ?: "JXA"
+                Toast.makeText(context, if (format == "JXU") "Atualização do JeaxLabs OS instalada." else "Instalação do pacote .jxa concluída.", Toast.LENGTH_LONG).show()
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirmation = if (Build.VERSION.SDK_INT >= 33) {

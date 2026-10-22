@@ -56,6 +56,7 @@ class MainActivity : Activity() {
     private val lavender = Color.rgb(237, 230, 255)
     private val teal = Color.rgb(33, 143, 131)
     private var appReady = false
+    private var sessionUnlocked = false
     private var activePage = "home"
     private var cachedApps: List<ResolveInfo> = emptyList()
     private var kioskStartPending = false
@@ -96,8 +97,18 @@ class MainActivity : Activity() {
         }
         when (activePage) {
             "home" -> { }
+            "lockscreen", "startup" -> { }
             "welcome" -> showWelcome()
             else -> showHome()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (prefs.getBoolean("setup_done", false) && !prefs.getBoolean("kiosk_enabled", false)) {
+            sessionUnlocked = true
+            showHome()
         }
     }
 
@@ -317,12 +328,14 @@ class MainActivity : Activity() {
             if (prefs.getBoolean("kiosk_enabled", false) && dpm.isDeviceOwnerApp(packageName)) {
                 showKioskScreen()
                 startManagedLockTask()
+            } else if (prefs.getBoolean("setup_done", false) && !sessionUnlocked) {
+                showLockScreen()
             } else if (prefs.getBoolean("setup_done", false)) {
                 showHome()
             } else {
                 showWelcome()
             }
-        }, 700)
+        }, 900)
     }
 
     private fun showWelcome() {
@@ -343,7 +356,7 @@ class MainActivity : Activity() {
         root.addView(label("Conheça o JeaxLabs OS: uma interface feita para reunir seus aplicativos, controles e ferramentas em um só lugar.", 16f, Color.rgb(236, 230, 255)))
         root.addView(space(28))
         root.addView(button("Começar configuração  →", { showSetup() }, Color.WHITE, purpleDark, 58, 20))
-        root.addView(label("JeaxLabs OS  •  versão 1.1.0", 12f, Color.rgb(222, 213, 248)).apply {
+        root.addView(label("JeaxLabs OS  •  versão 1.2.0", 12f, Color.rgb(222, 213, 248)).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         })
@@ -367,6 +380,7 @@ class MainActivity : Activity() {
         body.addView(space(8))
         body.addView(button("Finalizar configuração", {
             prefs.edit().putBoolean("setup_done", true).apply()
+            sessionUnlocked = true
             if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 92)
             }
@@ -374,117 +388,333 @@ class MainActivity : Activity() {
         }))
         body.addView(button("Pular por enquanto", {
             prefs.edit().putBoolean("setup_done", true).apply()
+            sessionUnlocked = true
             showHome()
         }, Color.WHITE, purple))
         setContentView(pair.first)
     }
 
     private fun showHome() {
+        sessionUnlocked = true
         setBars(true)
         activePage = "home"
-        window.statusBarColor = Color.rgb(75, 137, 210)
-        window.navigationBarColor = Color.rgb(48, 40, 87)
+        window.statusBarColor = Color.rgb(176, 59, 57)
+        window.navigationBarColor = Color.rgb(39, 52, 111)
         window.decorView.systemUiVisibility = 0
-        val pair = pageScroll(22)
+        val pair = pageScroll(20)
         val body = pair.second
-        pair.first.background = gradient(Color.rgb(83, 150, 218), Color.rgb(55, 47, 98))
-        body.setPadding(dp(22), dp(20), dp(22), dp(24))
+        pair.first.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(Color.rgb(177, 59, 55), Color.rgb(119, 92, 124), Color.rgb(43, 61, 130))
+        )
+        body.setPadding(dp(22), dp(15), dp(22), dp(22))
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        top.addView(brandMark(42))
+        top.addView(brandMark(36))
         val titleBlock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-        titleBlock.addView(label("JEAXLABS OS", 13f, Color.WHITE, true))
-        titleBlock.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 12f, Color.rgb(231, 230, 255)))
+        titleBlock.addView(label("JEAXLABS OS", 12f, Color.WHITE, true))
+        titleBlock.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 11f, Color.rgb(244, 235, 255)))
         top.addView(titleBlock)
-        val control = TextView(this).apply {
+        top.addView(TextView(this).apply {
             text = "☷"
-            textSize = 24f
+            textSize = 23f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(Color.argb(65, 255, 255, 255), 16)
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+            background = rounded(Color.argb(50, 255, 255, 255), 18)
+            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
+            contentDescription = "Central de controle"
             setOnClickListener { showControlCenter() }
-        }
-        top.addView(control)
+        })
         body.addView(top)
-        body.addView(space(30))
 
-        val timeWidget = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(5), dp(4), dp(7))
+        body.addView(space(76))
+        val weather = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(7), dp(2), dp(7))
             layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(22)
+                bottomMargin = dp(26)
             }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showWeatherDialog() }
         }
-        timeWidget.addView(label("SEU DIA, DO SEU JEITO", 11f, Color.rgb(235, 225, 255), true))
-        timeWidget.addView(space(4))
-        val clock = label(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()), 48f, Color.WHITE, true)
-        timeWidget.addView(clock)
-        timeWidget.addView(label("Seus aplicativos e controles, a um toque.", 14f, Color.rgb(244, 240, 255)))
-        body.addView(timeWidget)
+        weather.addView(label("☀", 45f, Color.rgb(255, 222, 119), true))
+        val weatherInfo = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        weatherInfo.addView(label("Clima local", 25f, Color.WHITE))
+        val city = prefs.getString("weather_city", "")?.trim().orEmpty()
+        weatherInfo.addView(label(if (city.isBlank()) "Toque para configurar sua cidade" else "$city · demonstração", 14f, Color.rgb(245, 235, 255)))
+        weatherInfo.addView(label(if (city.isBlank()) "Personalize este widget" else "Previsão real será conectada na próxima etapa", 11f, Color.rgb(230, 219, 246)))
+        weather.addView(weatherInfo)
+        weather.addView(label("›", 27f, Color.WHITE))
+        body.addView(weather)
 
         val searchBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(17), 0, dp(17), 0)
-            background = rounded(Color.WHITE, 28)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(20) }
+            setPadding(dp(16), 0, dp(16), 0)
+            background = rounded(Color.rgb(246, 245, 249), 32)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(29) }
             isClickable = true
             isFocusable = true
+            contentDescription = "Pesquisar aplicativos"
             setOnClickListener { showAppsPage() }
         }
-        searchBar.addView(label("⌕", 25f, purple, true))
-        val searchCaption = label("Pesquisar aplicativos", 14f, muted)
-        searchCaption.setPadding(dp(10), 0, 0, 0)
+        searchBar.addView(label("G", 25f, Color.rgb(66, 133, 244), true))
+        val searchCaption = label("Pesquisar aplicativos", 14f, Color.rgb(90, 89, 100))
+        searchCaption.setPadding(dp(12), 0, 0, 0)
         searchBar.addView(searchCaption, LinearLayout.LayoutParams(0, -1, 1f))
-        searchBar.addView(label("⌗", 19f, purple))
+        searchBar.addView(label("🎙", 18f, Color.rgb(66, 133, 244)))
         body.addView(searchBar)
 
-        val appTitleRow = LinearLayout(this).apply {
+        addHomeAppRow(body)
+        body.addView(space(17))
+        body.addView(label("●   ○", 13f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(2), 0, dp(10))
+            setOnClickListener { showAppsPage() }
+            contentDescription = "Páginas da tela inicial; toque para ver aplicativos"
+        })
+
+        val dock = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(9), dp(8), dp(9), dp(8))
+            background = rounded(Color.argb(58, 255, 255, 255), 27)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(82)).apply {
+                bottomMargin = dp(15)
+                topMargin = dp(3)
+            }
+        }
+        pickHomeApps(
+            listOf(
+                listOf("com.samsung.android.dialer", "com.google.android.dialer", "com.android.dialer", "Telefone"),
+                listOf("com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.messaging", "Mensagens"),
+                listOf("com.sec.android.app.sbrowser", "com.android.chrome", "Navegador", "Internet"),
+                listOf("com.sec.android.app.camera", "com.android.camera2", "Câmera", "Camera")
+            ), 4
+        ).forEach { info -> dock.addView(dockShortcut(info), LinearLayout.LayoutParams(0, -1, 1f)) }
+        body.addView(dock)
+
+        val bottomTools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val controls = label("Central", 12f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { showControlCenter() }
+        }
+        val locker = label("Bloquear tela", 12f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { showLockScreen() }
+        }
+        val apps = label("Todos os apps", 12f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { showAppsPage() }
+        }
+        bottomTools.addView(controls, LinearLayout.LayoutParams(0, -2, 1f))
+        bottomTools.addView(locker, LinearLayout.LayoutParams(0, -2, 1f))
+        bottomTools.addView(apps, LinearLayout.LayoutParams(0, -2, 1f))
+        body.addView(bottomTools)
+        setContentView(pair.first)
+    }
+
+    private fun addHomeAppRow(parent: LinearLayout) {
+        val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(2), dp(2), dp(8))
+            setPadding(dp(2), 0, dp(2), dp(10))
         }
-        appTitleRow.addView(label("Aplicativos", 17f, Color.WHITE, true), LinearLayout.LayoutParams(0, -2, 1f))
-        val allApps = label("Ver todos  ›", 12f, Color.WHITE, true)
-        allApps.setOnClickListener { showAppsPage() }
-        appTitleRow.addView(allApps)
-        body.addView(appTitleRow)
-        addAppGrid(body, cachedApps.take(8), 4, Color.WHITE)
-
-        body.addView(space(12))
-        val shortcuts = GridLayout(this).apply {
-            columnCount = 2
-            useDefaultMargins = false
-            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+        titleRow.addView(label("Aplicativos", 15f, Color.WHITE, true), LinearLayout.LayoutParams(0, -2, 1f))
+        titleRow.addView(label("Ver todos  ›", 12f, Color.WHITE, true).apply {
+            setOnClickListener { showAppsPage() }
+        })
+        parent.addView(titleRow)
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
         }
-        shortcuts.addView(quickCard("⌁", "Conexões", "Wi-Fi e Bluetooth", { showControlCenter() }), gridParams())
-        shortcuts.addView(quickCard("⚙", "Configurações", "Ajustes do dispositivo", { showSettingsPage() }), gridParams())
-        shortcuts.addView(quickCard("▣", "Task Locker", "Modo controlado", { showTaskLockerPage() }), gridParams())
-        shortcuts.addView(quickCard("♧", "Notificações", "Central de avisos", { showNotificationsPage() }), gridParams())
-        body.addView(shortcuts)
+        pickHomeApps(
+            listOf(
+                listOf("com.sec.android.app.samsungapps", "Galaxy Store"),
+                listOf("com.sec.android.gallery3d", "com.google.android.apps.photos", "Galeria", "Gallery"),
+                listOf("com.android.vending", "Play Store"),
+                listOf("com.google.android.googlequicksearchbox", "Google")
+            ), 4
+        ).forEach { info -> row.addView(homeAppShortcut(info), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)) }
+        parent.addView(row)
+    }
 
-        section(body, "JeaxLabs", "Abrir loja  ›") { showStorePage() }
-        val official = card(Color.argb(238, 255, 255, 255), 15, 20)
-        official.addView(label("Loja e atualizações", 15f, ink, true))
-        official.addView(label("Catálogo oficial e canal de versões do JeaxLabs OS.", 12f, muted))
-        official.addView(space(8))
-        official.addView(button("Loja JeaxLabs", { showStorePage() }, lavender, purple, 44, 14))
-        official.addView(button("Atualizações do sistema", { showUpdatesPage() }, lavender, purple, 44, 14))
-        body.addView(official)
+    private fun pickHomeApps(groups: List<List<String>>, count: Int): List<ResolveInfo> {
+        val result = mutableListOf<ResolveInfo>()
+        val used = mutableSetOf<String>()
+        groups.forEach { group ->
+            val match = cachedApps.firstOrNull { info ->
+                val pkg = info.activityInfo.packageName
+                val title = info.loadLabel(packageManager).toString()
+                pkg !in used && group.any { term ->
+                    if (term.contains('.') && term == term.lowercase(Locale.ROOT)) pkg.equals(term, true)
+                    else title.contains(term, true)
+                }
+            }
+            if (match != null) {
+                result.add(match)
+                used.add(match.activityInfo.packageName)
+            }
+        }
+        if (result.size < count) {
+            cachedApps.forEach { info ->
+                if (result.size < count && used.add(info.activityInfo.packageName)) result.add(info)
+            }
+        }
+        return result.take(count)
+    }
 
-        val footer = label("JEAXLABS OS  ·  1.1.0", 10f, Color.rgb(235, 227, 255), true)
-        footer.gravity = Gravity.CENTER
-        footer.setPadding(0, dp(16), 0, dp(8))
-        body.addView(footer)
-        setContentView(pair.first)
+    private fun homeAppShortcut(info: ResolveInfo): LinearLayout {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(3), dp(2), dp(3), dp(5))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { launchApp(info.activityInfo.packageName) }
+        }
+        val icon = ImageView(this).apply {
+            try { setImageDrawable(info.loadIcon(packageManager)) } catch (_: Exception) {}
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(54), dp(54))
+        }
+        val appName = label(info.loadLabel(packageManager).toString(), 11f, Color.WHITE)
+        appName.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        appName.maxLines = 2
+        appName.textAlignment = View.TEXT_ALIGNMENT_CENTER
+        tile.addView(icon)
+        tile.addView(space(3))
+        tile.addView(appName)
+        return tile
+    }
+
+    private fun dockShortcut(info: ResolveInfo): LinearLayout {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            contentDescription = info.loadLabel(packageManager).toString()
+            setOnClickListener { launchApp(info.activityInfo.packageName) }
+        }
+        val icon = ImageView(this).apply {
+            try { setImageDrawable(info.loadIcon(packageManager)) } catch (_: Exception) {}
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        }
+        tile.addView(icon)
+        return tile
+    }
+
+    private fun showWeatherDialog() {
+        val input = EditText(this).apply {
+            hint = "Cidade (ex.: Curitiba, PR)"
+            setText(prefs.getString("weather_city", ""))
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Widget de clima")
+            .setMessage("Escolha o nome da cidade para personalizar o widget. A previsão meteorológica real ainda não está conectada nesta simulação.")
+            .setView(input)
+            .setPositiveButton("Salvar") { _, _ ->
+                prefs.edit().putString("weather_city", input.text.toString().trim()).apply()
+                showHome()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showLockScreen() {
+        setBars(true)
+        activePage = "lockscreen"
+        window.statusBarColor = Color.rgb(171, 59, 57)
+        window.navigationBarColor = Color.rgb(42, 52, 109)
+        window.decorView.systemUiVisibility = 0
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(26), dp(38), dp(26), dp(25))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.rgb(184, 66, 57), Color.rgb(116, 93, 130), Color.rgb(40, 56, 119))
+            )
+        }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        top.addView(brandMark(34))
+        top.addView(label("JEAXLABS OS", 12f, Color.WHITE, true).apply { setPadding(dp(9), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
+        top.addView(label("●  ▰", 13f, Color.WHITE))
+        root.addView(top)
+        root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        root.addView(label(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()), 68f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
+        root.addView(space(5))
+        root.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 16f, Color.WHITE).apply { gravity = Gravity.CENTER })
+        root.addView(space(25))
+        val notifications = readSavedNotifications()
+        val notificationCard = card(Color.argb(45, 255, 255, 255), 15, 20).apply { elevation = 0f }
+        if (notifications.length() == 0) {
+            notificationCard.addView(label("Nenhuma notificação nova", 13f, Color.WHITE).apply { gravity = Gravity.CENTER })
+        } else {
+            for (i in 0 until minOf(2, notifications.length())) {
+                val item = notifications.optJSONObject(i) ?: continue
+                notificationCard.addView(label(item.optString("app", "Aplicativo"), 11f, Color.rgb(239, 232, 255), true))
+                notificationCard.addView(label(item.optString("title", "Notificação"), 14f, Color.WHITE, true))
+                notificationCard.addView(label(item.optString("text", ""), 12f, Color.rgb(250, 246, 255)))
+                if (i < notifications.length() - 1) notificationCard.addView(space(7))
+            }
+        }
+        root.addView(notificationCard)
+        root.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        root.addView(label("◉", 30f, Color.WHITE).apply { gravity = Gravity.CENTER })
+        root.addView(space(7))
+        root.addView(button("Deslize para desbloquear  ↑", {
+            sessionUnlocked = true
+            showHome()
+        }, Color.argb(235, 255, 255, 255), purpleDark, 55, 24))
+        root.addView(label("Simulação de tela de bloqueio", 11f, Color.rgb(234, 224, 250)).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, 0)
+        })
+        var startY = 0f
+        root.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startY = event.rawY
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (startY - event.rawY > dp(65)) {
+                        sessionUnlocked = true
+                        showHome()
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+        setContentView(root)
     }
 
     private fun gridParams(): GridLayout.LayoutParams = GridLayout.LayoutParams().apply {
@@ -633,23 +863,66 @@ class MainActivity : Activity() {
     private fun showControlCenter() {
         setBars(false)
         activePage = "control"
-        val pair = pageScroll()
+        val pair = pageScroll(18)
         val body = pair.second
-        body.addView(pageHeader("Central de controle", "Acesso rápido aos recursos do Android"))
-        val info = card(purpleDark, 18, 22)
-        info.addView(label("CONTROLES DO DISPOSITIVO", 11f, Color.rgb(222, 210, 255), true))
-        info.addView(space(5))
-        info.addView(label("Ajuste as conexões e os recursos do seu tablet.", 16f, Color.WHITE, true))
-        body.addView(info)
-        body.addView(rowButton("⌁", "Wi-Fi", "Conectar ou trocar de rede", { openSettings(Settings.ACTION_WIFI_SETTINGS) }))
-        body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios", { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }))
-        body.addView(rowButton("☼", "Tela e brilho", "Brilho e rotação", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
-        body.addView(rowButton("♫", "Som", "Volume e sons do sistema", { openSettings(Settings.ACTION_SOUND_SETTINGS) }))
-        body.addView(rowButton("▣", "Bateria", getBatteryDescription(), { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }))
-        body.addView(rowButton("♧", "Notificações", "Ver avisos recebidos", { showNotificationsPage() }))
-        body.addView(rowButton("⌑", "Task Locker", "Bloquear o uso em um ambiente controlado", { showTaskLockerPage() }))
+        pair.first.setBackgroundColor(Color.rgb(242, 239, 249))
+        body.addView(label("‹   JEAXLABS OS", 12f, purple, true).apply {
+            setPadding(0, dp(4), 0, dp(18))
+            setOnClickListener { showHome() }
+        })
+        body.addView(label(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()), 34f, ink, true))
+        body.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 13f, muted))
+        body.addView(space(17))
+        val status = card(Color.WHITE, 17, 22)
+        status.addView(label("Controle do dispositivo", 17f, ink, true))
+        status.addView(label(getBatteryDescription() + "  ·  JeaxLabs OS 1.2.0", 12f, muted))
+        body.addView(status)
+
+        section(body, "Conexões e recursos")
+        val grid = GridLayout(this).apply {
+            columnCount = 2
+            useDefaultMargins = false
+            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        grid.addView(controlTile("⌁", "Wi-Fi", "Configurações da rede") { openSettings(Settings.ACTION_WIFI_SETTINGS) }, gridParams())
+        grid.addView(controlTile("ᛒ", "Bluetooth", "Acessórios próximos") { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, gridParams())
+        grid.addView(controlTile("☼", "Tela", "Brilho e rotação") { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }, gridParams())
+        grid.addView(controlTile("♫", "Som", "Volume e áudio") { openSettings(Settings.ACTION_SOUND_SETTINGS) }, gridParams())
+        grid.addView(controlTile("▤", "Bateria", getBatteryDescription()) { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }, gridParams())
+        grid.addView(controlTile("♧", "Notificações", "Ver avisos ativos") { showNotificationsPage() }, gridParams())
+        body.addView(grid)
+
+        val brightness = card(Color.WHITE, 17, 20)
+        brightness.addView(label("Brilho da simulação", 15f, ink, true))
+        brightness.addView(label("Ajusta o brilho enquanto o JeaxLabs OS está aberto.", 12f, muted))
+        val slider = SeekBar(this).apply {
+            max = 100
+            progress = prefs.getInt("ui_brightness", 75)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val attributes = window.attributes
+                    attributes.screenBrightness = progress.coerceAtLeast(8) / 100f
+                    window.attributes = attributes
+                    prefs.edit().putInt("ui_brightness", progress).apply()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        brightness.addView(slider)
+        body.addView(brightness)
+        body.addView(rowButton("⌑", "JeaxLabs Task Locker", "Bloqueio real com Device Owner quando disponível", { showTaskLockerPage() }))
+        body.addView(rowButton("▣", "Bloquear tela", "Voltar à tela de bloqueio simulada", { showLockScreen() }))
+        body.addView(rowButton("⚙", "Todas as configurações", "Personalização e recursos do sistema", { showSettingsPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
+    }
+
+    private fun controlTile(symbol: String, title: String, subtitle: String, action: () -> Unit): LinearLayout {
+        return quickCard(symbol, title, subtitle, action).apply {
+            background = rounded(Color.WHITE, 20)
+            minimumHeight = dp(116)
+        }
     }
 
     private fun getBatteryDescription(): String {
@@ -670,6 +943,11 @@ class MainActivity : Activity() {
         body.addView(rowButton("☼", "Tela", "Brilho, rotação e suspensão", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
         body.addView(rowButton("♫", "Som e vibração", "Volume e preferências de áudio", { openSettings(Settings.ACTION_SOUND_SETTINGS) }))
         body.addView(rowButton("♧", "Notificações", "Acesso e preferências", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
+        body.addView(rowButton("▣", "Tela de bloqueio simulada", "Prévia do bloqueio JeaxLabs OS", { showLockScreen() }))
+        body.addView(rowButton("↻", "Reiniciar interface", "Reproduzir a tela de inicialização", {
+            sessionUnlocked = false
+            showStartup()
+        }))
         body.addView(rowButton("▦", "Aplicativos", "Aplicativos instalados e padrões", { openSettings(Settings.ACTION_APPLICATION_SETTINGS) }))
         body.addView(rowButton("▤", "Armazenamento", "Espaço usado e disponível", { openSettings(Settings.ACTION_INTERNAL_STORAGE_SETTINGS) }))
         body.addView(rowButton("◇", "Segurança", "Bloqueio de tela e permissões", { openSettings(Settings.ACTION_SECURITY_SETTINGS) }))
@@ -873,7 +1151,7 @@ class MainActivity : Activity() {
         root.addView(label("Este dispositivo está no modo de uso controlado.", 14f, Color.rgb(235, 228, 255)).apply { gravity = Gravity.CENTER })
         root.addView(space(25))
         root.addView(button("Desbloquear com PIN", { showPinDialog("Desbloquear Task Locker") { stopKiosk() } }, Color.WHITE, purpleDark, 54, 18))
-        root.addView(label("JeaxLabs OS  ·  1.1.0", 11f, Color.rgb(220, 210, 249)).apply { gravity = Gravity.CENTER })
+        root.addView(label("JeaxLabs OS  ·  1.2.0", 11f, Color.rgb(220, 210, 249)).apply { gravity = Gravity.CENTER })
         setContentView(root)
     }
 
@@ -1007,7 +1285,7 @@ class MainActivity : Activity() {
         val body = pair.second
         body.addView(pageHeader("Atualizações", "Verificação do canal oficial JeaxLabs"))
         val state = card(Color.WHITE, 18, 20)
-        state.addView(label("JeaxLabs OS 1.1.0", 19f, ink, true))
+        state.addView(label("JeaxLabs OS 1.2.0", 19f, ink, true))
         state.addView(label("Versão instalada nesta compilação", 12f, muted))
         state.addView(space(12))
         state.addView(label("Última versão publicada no canal", 13f, muted))
@@ -1046,7 +1324,7 @@ class MainActivity : Activity() {
         hero.addView(mark)
         hero.addView(space(14))
         hero.addView(label("JeaxLabs OS", 25f, Color.WHITE, true))
-        hero.addView(label("Versão de interface 1.1.0", 13f, Color.rgb(230, 222, 255)))
+        hero.addView(label("Versão de interface 1.2.0", 13f, Color.rgb(230, 222, 255)))
         body.addView(hero)
         body.addView(rowButton("▣", "Dispositivo", Build.MANUFACTURER + " " + Build.MODEL, { }))
         body.addView(rowButton("▤", "Android", "Versão " + Build.VERSION.RELEASE + " · SDK " + Build.VERSION.SDK_INT, { }))

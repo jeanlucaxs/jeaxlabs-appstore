@@ -360,9 +360,9 @@ class MainActivity : Activity() {
         body.addView(label("Vamos preparar\ntudo para você.", 30f, ink, true))
         body.addView(label("Esta etapa é rápida. Você pode ajustar cada item novamente depois.", 14f, muted))
         body.addView(space(20))
-        body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede") { openSettings(Settings.ACTION_WIFI_SETTINGS) })
-        body.addView(rowButton("◐", "Tela e aparência", "Brilho, tamanho e rotação da tela") { openSettings(Settings.ACTION_DISPLAY_SETTINGS) })
-        body.addView(rowButton("♢", "Notificações", "Ative o acesso para exibi-las no JeaxLabs OS") { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) })
+        body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede", { openSettings(Settings.ACTION_WIFI_SETTINGS) }))
+        body.addView(rowButton("◐", "Tela e aparência", "Brilho, tamanho e rotação da tela", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
+        body.addView(rowButton("♢", "Notificações", "Ative o acesso para exibi-las no JeaxLabs OS", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
         body.addView(space(8))
         body.addView(button("Finalizar configuração", {
             prefs.edit().putBoolean("setup_done", true).apply()

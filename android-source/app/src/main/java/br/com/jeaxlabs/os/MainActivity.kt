@@ -2199,11 +2199,11 @@ class MainActivity : Activity() {
         state.addView(label(prefs.getString("remote_release", "Consultando…") ?: "Consultando…", 20f, purple, true))
         state.addView(space(8))
         val updateData = try { JSONObject(prefs.getString("remote_update_json", "") ?: "") } catch (_: Exception) { null }
-        if (updateData != null && updateData.has("url")) {
+        if (updateData != null && (updateData.has("url") || updateData.has("download_url"))) {
             state.addView(label(updateData.optString("version", "Nova versão disponível"), 15f, ink, true))
-            state.addView(label(updateData.optString("notes", "Atualização disponível."), 13f, muted))
+            state.addView(label(updateData.optString("notes", updateData.optString("release_notes", "Atualização disponível.")), 13f, muted))
             state.addView(button("Abrir pacote de atualização", {
-                val url = updateData.optString("url", "")
+                val url = updateData.optString("url", updateData.optString("download_url", ""))
                 if (url.startsWith("https://")) downloadPackage(url, "JeaxLabsOS-update") else toast("URL de atualização inválida.")
             }))
         } else {

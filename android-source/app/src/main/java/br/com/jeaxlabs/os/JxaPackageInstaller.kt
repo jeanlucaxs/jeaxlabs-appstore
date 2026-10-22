@@ -23,6 +23,9 @@ object JxaPackageInstaller {
         }
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        if (verified.packageFormat == "JXU") {
+            params.setAppPackageName(context.packageName)
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             params.setRequireUserAction(
                 if (deviceOwner) PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED

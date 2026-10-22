@@ -1924,7 +1924,7 @@ class MainActivity : Activity() {
         val urlInput = EditText(this).apply {
             hint = "https://servidor/aplicativo.jxa"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            singleLine = true
+            setSingleLine(true)
             setTextColor(ink)
             setHintTextColor(muted)
             setPadding(dp(13), dp(8), dp(13), dp(8))
@@ -1934,7 +1934,7 @@ class MainActivity : Activity() {
         val passwordInput = EditText(this).apply {
             hint = "Senha de criptografia do .jxa"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            singleLine = true
+            setSingleLine(true)
             setTextColor(ink)
             setHintTextColor(muted)
             setPadding(dp(13), dp(8), dp(13), dp(8))
@@ -1967,7 +1967,7 @@ class MainActivity : Activity() {
         val input = EditText(this).apply {
             hint = "64 caracteres hexadecimais"
             inputType = InputType.TYPE_CLASS_TEXT
-            singleLine = true
+            setSingleLine(true)
             setText(prefs.getString("jxa_trusted_fingerprint", "").orEmpty())
             setSelection(text.length)
         }
@@ -2007,7 +2007,7 @@ class MainActivity : Activity() {
         val input = EditText(this).apply {
             hint = "Senha de criptografia do pacote"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            singleLine = true
+            setSingleLine(true)
         }
         AlertDialog.Builder(this)
             .setTitle("Instalar " + suggestedName)
@@ -2030,7 +2030,7 @@ class MainActivity : Activity() {
         val input = EditText(this).apply {
             hint = "https://servidor/JeaxLabsOS-1.4.1.jxu"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            singleLine = true
+            setSingleLine(true)
         }
         AlertDialog.Builder(this)
             .setTitle("Aplicar atualização .jxu")
@@ -2062,7 +2062,7 @@ class MainActivity : Activity() {
         val input = EditText(this).apply {
             hint = "Senha de criptografia da atualização .jxu"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            singleLine = true
+            setSingleLine(true)
         }
         val noteText = if (notes.isBlank()) "Atualização oficial $version" else notes.take(900)
         AlertDialog.Builder(this)

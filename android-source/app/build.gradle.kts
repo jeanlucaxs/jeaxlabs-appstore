@@ -1,0 +1,17 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+android {
+    namespace = "br.com.jeaxlabs.os"
+    compileSdk = 35
+    defaultConfig {
+        applicationId = "br.com.jeaxlabs.os"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 100
+        versionName = "1.0.0"
+    }
+    buildTypes { release { isMinifyEnabled = false } }
+    kotlinOptions { jvmTarget = "17" }
+}

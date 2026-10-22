@@ -1,3 +1,18 @@
+val releaseVersion = java.util.Properties().apply {
+    rootProject.file("../version.properties").inputStream().use { load(it) }
+}
+
+val releaseStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
+val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val releaseSigningReady = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,13 +26,27 @@ android {
         applicationId = "br.com.jeaxlabs.os"
         minSdk = 26
         targetSdk = 35
-        versionCode = 140
-        versionName = "1.4.0"
+        versionCode = releaseVersion.getProperty("VERSION_CODE").toInt()
+        versionName = releaseVersion.getProperty("VERSION_NAME")
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("officialRelease") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseSigningReady) {
+                signingConfig = signingConfigs.getByName("officialRelease")
+            }
         }
     }
 

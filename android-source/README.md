@@ -28,7 +28,8 @@ Se um PIN/padrão seguro do Android já estiver configurado, a política setKeyg
 - Guarde a chave privada fora do GitHub público. O receptor deve confiar no fingerprint por um canal independente.
 - O APK implementa a importação remota de `.jxa`: exige fingerprint Ed25519 confiável definido localmente, verifica assinatura/SHA-256, descriptografa com a senha e entrega o APK validado ao PackageInstaller.
 - Para configurar o fingerprint, acesse Configurações → Pacotes .jxa. Copie o SHA-256 exibido pelo App Packer e confirme-o por um canal independente do pacote.
-- O APK ainda não implementa a validação, descriptografia e instalação de `.jxu`.
+- O fluxo `.jxu` usa o mesmo fingerprint confiável que os pacotes `.jxa`. Ele valida assinatura Ed25519, SHA-256, senha AES-GCM, pacote de destino, versão e versionCode, e então solicita ao Android que substitua o JeaxLabs OS pelo APK mais novo.
+- A instalação substitutiva exige que o novo APK mantenha o mesmo certificado de assinatura Android e um versionCode superior. O Android pode apresentar uma confirmação de sistema, dependendo do modo de gerenciamento e das políticas do dispositivo.
 
 ## Versionamento e build oficial
 

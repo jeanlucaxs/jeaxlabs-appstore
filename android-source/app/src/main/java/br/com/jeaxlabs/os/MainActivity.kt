@@ -1092,6 +1092,7 @@ class MainActivity : Activity() {
                 "bluetooth" -> showBluetoothPage()
                 "wifi" -> showWifiPage()
                 "setup" -> showSetup()
+                "welcome" -> showWelcome()
                 else -> showSettingsPage()
             }
         }

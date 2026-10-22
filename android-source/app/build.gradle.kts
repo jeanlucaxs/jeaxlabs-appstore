@@ -1,3 +1,8 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 val releaseVersion = java.util.Properties().apply {
     rootProject.file("../version.properties").inputStream().use { load(it) }
 }
@@ -12,11 +17,6 @@ val releaseSigningReady = listOf(
     releaseKeyAlias,
     releaseKeyPassword
 ).all { !it.isNullOrBlank() }
-
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
 
 android {
     namespace = "br.com.jeaxlabs.os"

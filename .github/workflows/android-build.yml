@@ -5,7 +5,7 @@ on:
     paths:
       - 'android-source/**'
       - 'tools/JeaxLabsAppPacker.py'
-      - 'version.properties'
+      - 'android-source/version.properties'
       - '.github/workflows/android-build.yml'
   pull_request:
     paths:
@@ -27,8 +27,8 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' version.properties)"
-          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' version.properties)"
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' android-source/version.properties)"
+          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' android-source/version.properties)"
           test -n "$VERSION_NAME"
           test -n "$VERSION_CODE"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"

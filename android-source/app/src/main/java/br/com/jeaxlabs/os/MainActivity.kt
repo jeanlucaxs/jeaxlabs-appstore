@@ -1973,7 +1973,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Fingerprint do publicador")
-            .setMessage("No App Packer, copie o fingerprint SHA-256 do certificado Ed25519. Obtenha e confira esse valor por um canal independente do arquivo .jxa. Uma chave incluída no próprio pacote não prova a identidade do publicador.")
+            .setMessage("No App Packer ou Update Packer, copie o fingerprint SHA-256 do certificado Ed25519. Obtenha e confira esse valor por um canal independente do arquivo .jxa. Uma chave incluída no próprio pacote não prova a identidade do publicador.")
             .setView(input)
             .setPositiveButton("Salvar") { _, _ ->
                 val normalized = input.text.toString()
@@ -2023,23 +2023,59 @@ class MainActivity : Activity() {
     }
 
     private fun installJxaFromUrl(packageUrl: String, packagePassword: String) {
+        installSecurePackageFromUrl(packageUrl, packagePassword, "JXA")
+    }
+
+    private fun promptForJxuInstall(packageUrl: String, version: String, notes: String) {
+        if (prefs.getString("jxa_trusted_fingerprint", "").isNullOrBlank()) {
+            AlertDialog.Builder(this)
+                .setTitle("Configurar publicador confiável")
+                .setMessage("Antes de aplicar uma atualização, cadastre o fingerprint SHA-256 do publicador e confira-o por um canal independente.")
+                .setPositiveButton("Configurar") { _, _ -> showJxaFingerprintDialog() }
+                .setNegativeButton("Cancelar", null)
+                .show()
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "Senha de criptografia da atualização .jxu"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            singleLine = true
+        }
+        val noteText = if (notes.isBlank()) "Atualização oficial $version" else notes.take(900)
+        AlertDialog.Builder(this)
+            .setTitle("Aplicar JeaxLabs OS $version")
+            .setMessage("$noteText\n\nO .jxu contém o novo APK. Depois da verificação, o Android tentará atualizar o aplicativo existente. A assinatura Android do novo APK precisa ser a mesma da instalação atual.")
+            .setView(input)
+            .setPositiveButton("Verificar e atualizar") { _, _ ->
+                val password = input.text.toString()
+                if (password.isBlank()) toast("Digite a senha do .jxu.")
+                else installSecurePackageFromUrl(packageUrl, password, "JXU")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun installSecurePackageFromUrl(packageUrl: String, packagePassword: String, format: String) {
+        val normalizedFormat = format.uppercase(Locale.ROOT)
+        val extension = if (normalizedFormat == "JXU") ".jxu" else ".jxa"
         val trustedFingerprint = prefs.getString("jxa_trusted_fingerprint", "").orEmpty()
         if (trustedFingerprint.isBlank()) {
             toast("Configure o fingerprint confiável do publicador antes de instalar.")
             return
         }
         if (!packageUrl.startsWith("https://", true)) {
-            toast("Por segurança, os pacotes .jxa só podem ser baixados por HTTPS.")
+            toast("Por segurança, pacotes .$normalizedFormat só podem ser baixados por HTTPS.")
             return
         }
-        toast("Baixando e validando o pacote .jxa…")
+        toast("Baixando e validando o pacote $extension…")
         thread {
             try {
                 val verified = JxaPackageCrypto.downloadAndDecrypt(
                     this@MainActivity,
                     packageUrl,
                     packagePassword,
-                    trustedFingerprint
+                    trustedFingerprint,
+                    normalizedFormat
                 )
                 try {
                     JxaPackageInstaller.install(
@@ -2048,14 +2084,15 @@ class MainActivity : Activity() {
                         dpm.isDeviceOwnerApp(packageName)
                     )
                     handler.post {
-                        toast("Pacote validado: " + verified.appName + " · v" + verified.version + ". Solicitação enviada ao instalador Android.")
+                        val action = if (normalizedFormat == "JXU") "Atualização enviada ao instalador Android" else "Pacote enviado ao instalador Android"
+                        toast("$action: " + verified.appName + " · v" + verified.version + ".")
                     }
                 } finally {
                     verified.apkFile.delete()
                 }
             } catch (error: Exception) {
                 val detail = error.message?.take(220) ?: "Erro desconhecido."
-                handler.post { toast("Pacote .jxa recusado: " + detail) }
+                handler.post { toast("Pacote $extension recusado: " + detail) }
             }
         }
     }
@@ -2200,16 +2237,26 @@ class MainActivity : Activity() {
         state.addView(space(8))
         val updateData = try { JSONObject(prefs.getString("remote_update_json", "") ?: "") } catch (_: Exception) { null }
         if (updateData != null && (updateData.has("url") || updateData.has("download_url"))) {
-            state.addView(label(updateData.optString("version", "Nova versão disponível"), 15f, ink, true))
-            state.addView(label(updateData.optString("notes", updateData.optString("release_notes", "Atualização disponível.")), 13f, muted))
-            state.addView(button("Abrir pacote de atualização", {
-                val url = updateData.optString("url", updateData.optString("download_url", ""))
-                if (url.startsWith("https://")) downloadPackage(url, "JeaxLabsOS-update") else toast("URL de atualização inválida.")
+            val updateVersion = updateData.optString("version", "Nova versão disponível")
+            val notes = updateData.optString("notes", updateData.optString("release_notes", "Atualização disponível."))
+            val url = updateData.optString("url", updateData.optString("download_url", ""))
+            val format = updateData.optString("package_type", if (url.substringBefore("?").substringBefore("#").endsWith(".jxu", true)) "system-update" else "")
+            state.addView(label(updateVersion, 15f, ink, true))
+            state.addView(label(notes, 13f, muted))
+            val isSystemUpdate = format == "system-update" || url.substringBefore("?").substringBefore("#").endsWith(".jxu", true)
+            state.addView(button(if (isSystemUpdate) "Verificar e aplicar atualização .jxu" else "Baixar pacote", {
+                if (!url.startsWith("https://", true)) {
+                    toast("URL de atualização inválida.")
+                } else if (isSystemUpdate) {
+                    promptForJxuInstall(url, updateVersion, notes)
+                } else {
+                    downloadPackage(url, "JeaxLabsOS-update")
+                }
             }))
         } else {
             state.addView(label("Nenhuma atualização foi publicada no canal.", 14f, teal, true))
         }
-        state.addView(label("A consulta ocorre automaticamente no máximo uma vez a cada 24 horas quando o app é aberto. A aplicação automática de pacotes .jxu ainda não está ativada.", 12f, muted))
+        state.addView(label("A verificação do canal ocorre automaticamente no máximo uma vez a cada 24 horas. Um .jxu validado contém o novo APK do sistema e solicita ao Android a substituição da versão instalada.", 12f, muted))
         body.addView(state)
         body.addView(button("Verificar novamente agora", {
             prefs.edit().putLong("last_update_check", 0L).apply()

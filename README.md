@@ -29,4 +29,4 @@ Se os requisitos de assinatura ou de metadados não forem cumpridos, a publicaç
 
 ## Limites técnicos conhecidos
 
-O APK atual oferece uma experiência de launcher/kiosk sobre Android; não é uma ROM ou firmware independente. O fluxo de instalação/atualização dos formatos `.jxa` e `.jxu` ainda não está implementado dentro do APK. O comportamento de kiosk, bloqueio e políticas Device Owner precisa ser validado em dispositivo físico antes de declarar essa validação concluída.
+O APK oferece uma experiência de launcher/kiosk sobre Android, não uma ROM independente. A importação de `.jxa` já valida fingerprint, assinatura, integridade e senha antes de encaminhar o APK ao instalador do Android. A instalação pode exigir confirmação do sistema fora do modo Device Owner. O fluxo de atualização `.jxu` ainda não está implementado no APK. O comportamento de kiosk, bloqueio e políticas Device Owner precisa ser validado em dispositivo físico antes de declarar essa validação concluída.

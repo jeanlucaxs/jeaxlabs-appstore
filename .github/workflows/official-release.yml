@@ -19,8 +19,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' version.properties)"
-          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' version.properties)"
+          VERSION_NAME="$(sed -n 's/^VERSION_NAME=//p' android-source/version.properties)"
+          VERSION_CODE="$(sed -n 's/^VERSION_CODE=//p' android-source/version.properties)"
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$TAG_VERSION" = "$VERSION_NAME" || { echo "Tag and version.properties do not match."; exit 1; }
@@ -28,7 +28,7 @@ jobs:
           test "$(jq -r '.release' catalog.json)" = "$VERSION_NAME" || { echo "catalog.json release does not match version.properties."; exit 1; }
           grep -Eq "^## \[$VERSION_NAME\]" CHANGELOG.md || { echo "CHANGELOG.md needs a section for $VERSION_NAME."; exit 1; }
           PREVIOUS_TAG="$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -Fxv "$GITHUB_REF_NAME" | head -n 1 || true)"
-          if [ -n "$PREVIOUS_TAG" ] && git show "$PREVIOUS_TAG:version.properties" >/tmp/previous-version.properties 2>/dev/null; then
+          if [ -n "$PREVIOUS_TAG" ] && git show "$PREVIOUS_TAG:android-source/version.properties" >/tmp/previous-version.properties 2>/dev/null; then
             PREVIOUS_CODE="$(sed -n 's/^VERSION_CODE=//p' /tmp/previous-version.properties)"
             if [[ "$PREVIOUS_CODE" =~ ^[0-9]+$ ]] && [ "$VERSION_CODE" -le "$PREVIOUS_CODE" ]; then
               echo "VERSION_CODE must be greater than the previous tagged version ($PREVIOUS_CODE)."

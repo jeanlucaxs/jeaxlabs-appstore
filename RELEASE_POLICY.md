@@ -6,11 +6,11 @@ Toda versão numerada publicada do JeaxLabs OS é uma versão oficial. Não publ
 
 ## Fonte única da versão
 
-O arquivo `version.properties` é a fonte da versão Android:
+O arquivo `android-source/version.properties` é a fonte da versão Android:
 - `VERSION_NAME`: versão SemVer, por exemplo `1.4.1`.
 - `VERSION_CODE`: inteiro Android estritamente maior que o de toda versão já distribuída.
 
-Ao preparar uma nova versão, atualizar no mesmo commit `version.properties`, o campo `release` de `catalog.json` e uma entrada com notas em `CHANGELOG.md`. A tag oficial deve corresponder exatamente ao nome, no formato `v<VERSION_NAME>`.
+Ao preparar uma nova versão, atualizar no mesmo commit `android-source/version.properties`, o campo `release` de `catalog.json` e uma entrada com notas em `CHANGELOG.md`. A tag oficial deve corresponder exatamente ao nome, no formato `v<VERSION_NAME>`.
 
 ## Publicação oficial
 

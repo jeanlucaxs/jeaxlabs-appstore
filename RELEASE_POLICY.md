@@ -19,7 +19,7 @@ A publicação oficial é feita pela workflow `.github/workflows/official-releas
 2. Exige a chave permanente de assinatura Android armazenada em GitHub Actions Secrets.
 3. Compila e testa o build de release, verifica a assinatura e calcula SHA-256.
 4. Publica o APK assinado, o código-fonte e os utilitários Python em uma GitHub Release.
-5. Aciona a atualização do manifesto no repositório `jeaxlabs-os-updates`.
+5. Cria um `.jxu` cifrado que contém a APK da mesma versão, publica ambos os arquivos e aciona o manifesto apontando para o `.jxu` no repositório `jeaxlabs-os-updates`.
 
 Não criar uma nova chave de assinatura para cada versão. Guardar uma cópia de segurança segura do keystore e manter sua senha fora do repositório.
 
@@ -31,6 +31,9 @@ Configurar em **Settings → Secrets and variables → Actions**:
 - `ANDROID_KEY_ALIAS`: alias da chave.
 - `ANDROID_KEY_PASSWORD`: senha da chave.
 - `UPDATES_REPO_TOKEN`: token com acesso de escrita ao repositório `jeaxlabs-os-updates`, usado apenas para disparar a sincronização do manifesto.
+- `JXU_PUBLISHER_KEY_BASE64`: arquivo PEM da chave privada Ed25519 do publicador convertido para Base64. Use a mesma chave que será confiada nos pacotes `.jxa` e `.jxu`.
+- `JXU_PUBLISHER_KEY_PASSWORD`: senha que protege essa chave privada PEM.
+- `JXU_PACKAGE_PASSWORD`: senha usada para criptografar o conteúdo dos pacotes de atualização `.jxu`.
 
 A keystore deve ser criada e armazenada de forma segura antes da primeira publicação oficial assinada. Sem esses secrets, o workflow bloqueia a publicação em vez de marcar um APK debug como oficial.
 

@@ -3,7 +3,10 @@ package br.com.jeaxlabs.os
 import android.content.Context
 import android.util.Base64
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
+import org.bouncycastle.crypto.digests.SHA256Digest
+import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.params.KeyParameter
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -21,9 +24,7 @@ import java.util.Locale
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipFile
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 data class VerifiedJxaPackage(
@@ -176,13 +177,9 @@ object JxaPackageCrypto {
 
             val salt = decodeHex(manifest.optString("salt_hex"), 16, "salt")
             val nonce = decodeHex(manifest.optString("nonce_hex"), 12, "nonce")
-            val keySpec = PBEKeySpec(packagePassword.toCharArray(), salt, KDF_ROUNDS, 256)
-            val key = try {
-                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                    .generateSecret(keySpec).encoded
-            } finally {
-                keySpec.clearPassword()
-            }
+            val generator = PKCS5S2ParametersGenerator(SHA256Digest())
+            generator.init(packagePassword.toByteArray(StandardCharsets.UTF_8), salt, KDF_ROUNDS)
+            val key = (generator.generateDerivedParameters(256) as KeyParameter).key
 
             apkFile = File.createTempFile("jeax_verified_", ".apk", context.cacheDir)
             try {
@@ -356,12 +353,12 @@ object JxaPackageCrypto {
                 digest.update(buffer, 0, count)
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun sha256(data: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(data)
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun decodeHex(value: String, expectedBytes: Int, field: String): ByteArray {
         val normalized = value.trim()

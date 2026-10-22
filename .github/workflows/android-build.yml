@@ -11,7 +11,7 @@ on:
     paths:
       - 'android-source/**'
       - 'tools/JeaxLabsAppPacker.py'
-      - 'version.properties'
+      - 'android-source/version.properties'
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
 permissions:

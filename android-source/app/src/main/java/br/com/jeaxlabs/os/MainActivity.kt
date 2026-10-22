@@ -254,7 +254,50 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
 
+    private fun setBars(darkSurface: Boolean) {
+        if (darkSurface) {
+            window.statusBarColor = Color.rgb(49, 39, 94)
+            window.navigationBarColor = Color.rgb(38, 31, 69)
+            window.decorView.systemUiVisibility = 0
+        } else {
+            window.statusBarColor = background
+            window.navigationBarColor = background
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+    }
+
+    private fun logoOrMark(width: Int, height: Int): View {
+        val logoId = resources.getIdentifier("jeaxlabs_logo", "drawable", packageName)
+        val frame = FrameLayout(this).apply {
+            background = rounded(Color.WHITE, 18)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            layoutParams = LinearLayout.LayoutParams(dp(width), dp(height))
+        }
+        if (logoId != 0) {
+            val image = ImageView(this).apply {
+                setImageResource(logoId)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                layoutParams = FrameLayout.LayoutParams(-1, -1, Gravity.CENTER)
+                contentDescription = "Logo JeaxLabs"
+            }
+            frame.addView(image)
+        } else {
+            val fallback = TextView(this).apply {
+                text = "JEAXLABS"
+                textSize = 18f
+                typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
+                setTextColor(purpleDark)
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
+            }
+            frame.addView(fallback)
+        }
+        return frame
+    }
+
     private fun showStartup() {
+        setBars(true)
         activePage = "startup"
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -262,10 +305,8 @@ class MainActivity : Activity() {
             setPadding(dp(28), dp(32), dp(28), dp(32))
             background = gradient(Color.rgb(35, 27, 69), Color.rgb(115, 76, 194))
         }
-        root.addView(brandMark(84))
+        root.addView(logoOrMark(210, 76))
         root.addView(space(22))
-        root.addView(label("JEAXLABS", 17f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
-        root.addView(space(7))
         root.addView(label("Preparando seu espaço", 14f, Color.rgb(235, 228, 255)).apply { gravity = Gravity.CENTER })
         root.addView(space(26))
         val progress = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE) }
@@ -285,22 +326,14 @@ class MainActivity : Activity() {
     }
 
     private fun showWelcome() {
+        setBars(true)
         activePage = "welcome"
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(28), dp(38), dp(28), dp(25))
             background = gradient(Color.rgb(29, 26, 61), Color.rgb(113, 76, 191))
         }
-        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(brandMark(52))
-        val brandText = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-        }
-        brandText.addView(label("JEAXLABS", 16f, Color.WHITE, true))
-        brandText.addView(label("SISTEMA", 11f, Color.rgb(216, 204, 255)))
-        top.addView(brandText)
-        root.addView(top)
+        root.addView(logoOrMark(210, 64))
         val spacer = View(this)
         root.addView(spacer, LinearLayout.LayoutParams(1, 0, 1f))
         root.addView(label("OLÁ.", 14f, Color.rgb(223, 213, 255), true))
@@ -318,6 +351,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSetup() {
+        setBars(false)
         activePage = "setup"
         val pair = pageScroll()
         val body = pair.second
@@ -345,6 +379,7 @@ class MainActivity : Activity() {
     }
 
     private fun showHome() {
+        setBars(true)
         activePage = "home"
         window.statusBarColor = Color.rgb(75, 137, 210)
         window.navigationBarColor = Color.rgb(48, 40, 87)
@@ -542,6 +577,7 @@ class MainActivity : Activity() {
     }
 
     private fun showAppsPage(queryText: String = "") {
+        setBars(false)
         activePage = "apps"
         cachedApps = loadLaunchableApps()
         val pair = pageScroll()
@@ -594,6 +630,7 @@ class MainActivity : Activity() {
     }
 
     private fun showControlCenter() {
+        setBars(false)
         activePage = "control"
         val pair = pageScroll()
         val body = pair.second
@@ -622,6 +659,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsPage() {
+        setBars(false)
         activePage = "settings"
         val pair = pageScroll()
         val body = pair.second
@@ -642,6 +680,7 @@ class MainActivity : Activity() {
     }
 
     private fun showNotificationsPage() {
+        setBars(false)
         activePage = "notifications"
         val pair = pageScroll()
         val body = pair.second
@@ -687,6 +726,7 @@ class MainActivity : Activity() {
     }
 
     private fun showTaskLockerPage() {
+        setBars(false)
         activePage = "tasklocker"
         val pair = pageScroll()
         val body = pair.second
@@ -815,6 +855,7 @@ class MainActivity : Activity() {
     }
 
     private fun showKioskScreen() {
+        setBars(true)
         activePage = "kiosk"
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -843,6 +884,7 @@ class MainActivity : Activity() {
     }
 
     private fun showStorePage() {
+        setBars(false)
         activePage = "store"
         val pair = pageScroll()
         val body = pair.second
@@ -957,6 +999,7 @@ class MainActivity : Activity() {
     }
 
     private fun showUpdatesPage() {
+        setBars(false)
         activePage = "updates"
         checkForUpdatesIfDue()
         val pair = pageScroll()
@@ -992,6 +1035,7 @@ class MainActivity : Activity() {
     }
 
     private fun showAboutPage() {
+        setBars(false)
         activePage = "about"
         val pair = pageScroll()
         val body = pair.second

@@ -4,7 +4,7 @@ plugins {
 }
 
 val releaseVersion = java.util.Properties().apply {
-    rootProject.file("../version.properties").inputStream().use { load(it) }
+    rootProject.file("version.properties").inputStream().use { load(it) }
 }
 
 val releaseStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")

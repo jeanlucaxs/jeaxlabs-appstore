@@ -4,6 +4,11 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.AlertDialog
 import android.app.DownloadManager
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -60,6 +65,34 @@ class MainActivity : Activity() {
     private var activePage = "home"
     private var cachedApps: List<ResolveInfo> = emptyList()
     private var kioskStartPending = false
+    private var discoveredBluetoothDevices = linkedMapOf<String, BluetoothDevice>()
+    private var bluetoothReceiverRegistered = false
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                BluetoothDevice.ACTION_FOUND -> {
+                    val device = if (Build.VERSION.SDK_INT >= 33) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    if (device != null) {
+                        try {
+                            discoveredBluetoothDevices[device.address] = device
+                            if (activePage == "bluetooth") showBluetoothPage()
+                        } catch (_: SecurityException) {
+                        }
+                    }
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED,
+                BluetoothAdapter.ACTION_STATE_CHANGED,
+                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
+                    if (activePage == "bluetooth") showBluetoothPage()
+                }
+            }
+        }
+    }
 
     private val dpm by lazy { getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager }
     private val adminComponent by lazy { ComponentName(this, JeaxDeviceAdminReceiver::class.java) }
@@ -78,6 +111,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (activePage == "bluetooth") {
+            registerBluetoothReceiver()
+            handler.post { if (activePage == "bluetooth") showBluetoothPage() }
+        }
         if (appReady && prefs.getBoolean("kiosk_enabled", false) && dpm.isDeviceOwnerApp(packageName)) {
             handler.postDelayed({
                 if (appReady && prefs.getBoolean("kiosk_enabled", false) && !isSystemLockTaskActive()) {
@@ -86,6 +123,40 @@ class MainActivity : Activity() {
                 }
             }, 250)
         }
+    }
+
+    override fun onPause() {
+        unregisterBluetoothReceiver()
+        super.onPause()
+    }
+
+    private fun registerBluetoothReceiver() {
+        if (bluetoothReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+            addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(bluetoothReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(bluetoothReceiver, filter)
+            }
+            bluetoothReceiverRegistered = true
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun unregisterBluetoothReceiver() {
+        if (!bluetoothReceiverRegistered) return
+        try {
+            unregisterReceiver(bluetoothReceiver)
+        } catch (_: Exception) {
+        }
+        bluetoothReceiverRegistered = false
     }
 
     override fun onBackPressed() {
@@ -377,7 +448,7 @@ class MainActivity : Activity() {
         body.addView(label("Vamos preparar\ntudo para você.", 30f, ink, true))
         body.addView(label("Esta etapa é rápida. Você pode ajustar cada item novamente depois.", 14f, muted))
         body.addView(space(20))
-        body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede", { openSettings(Settings.ACTION_WIFI_SETTINGS) }))
+        body.addView(rowButton("⌁", "Conexão Wi-Fi", "Conecte o dispositivo à sua rede", { openPanelOrSettings(Settings.Panel.ACTION_WIFI, Settings.ACTION_WIFI_SETTINGS) }))
         body.addView(rowButton("◐", "Tela e aparência", "Brilho, tamanho e rotação da tela", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
         body.addView(rowButton("♢", "Notificações", "Ative o acesso para exibi-las no JeaxLabs OS", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
         body.addView(rowButton("⌂", "Tela inicial padrão", "Selecione o JeaxLabs OS como launcher", { openSettings(Settings.ACTION_HOME_SETTINGS) }))
@@ -886,6 +957,198 @@ class MainActivity : Activity() {
         return head
     }
 
+    private fun bluetoothPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(
+                android.Manifest.permission.BLUETOOTH_SCAN,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            )
+        } else if (Build.VERSION.SDK_INT >= 23) {
+            arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            emptyArray()
+        }
+    }
+
+    private fun hasBluetoothPermissions(): Boolean {
+        return bluetoothPermissions().all {
+            checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 721) {
+            if (grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
+                showBluetoothPage()
+            } else {
+                toast("Permita Dispositivos por perto para usar o Bluetooth no JeaxLabs OS.")
+                showBluetoothPage()
+            }
+        }
+    }
+
+    private fun bluetoothAdapter(): BluetoothAdapter? {
+        return try {
+            (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun showBluetoothPage() {
+        setBars(false)
+        activePage = "bluetooth"
+        registerBluetoothReceiver()
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Bluetooth", "Dispositivos próximos e pareados"))
+        val adapter = bluetoothAdapter()
+        if (adapter == null) {
+            val unavailable = card(Color.WHITE, 18, 20)
+            unavailable.addView(label("Bluetooth não disponível", 17f, ink, true))
+            unavailable.addView(label("Este dispositivo não disponibiliza um adaptador Bluetooth para o aplicativo.", 13f, muted))
+            body.addView(unavailable)
+        } else if (!hasBluetoothPermissions()) {
+            val permissionCard = card(Color.WHITE, 18, 20)
+            permissionCard.addView(label("Permissão necessária", 17f, ink, true))
+            permissionCard.addView(label("Para procurar e mostrar dispositivos, o Android precisa autorizar o JeaxLabs OS a acessar dispositivos próximos.", 13f, muted))
+            permissionCard.addView(button("Permitir acesso ao Bluetooth", {
+                val permissions = bluetoothPermissions()
+                if (permissions.isNotEmpty()) requestPermissions(permissions, 721)
+                else showBluetoothPage()
+            }))
+            body.addView(permissionCard)
+        } else {
+            val enabled = try { adapter.isEnabled } catch (_: SecurityException) { false }
+            val status = card(if (enabled) lavender else Color.WHITE, 18, 22)
+            status.addView(label(if (enabled) "Bluetooth ativado" else "Bluetooth desativado", 19f, ink, true))
+            status.addView(label(
+                if (enabled) "Você pode ver dispositivos pareados e buscar novos." else "Ative o Bluetooth para buscar e parear dispositivos.",
+                13f, muted
+            ))
+            status.addView(space(8))
+            if (!enabled) {
+                status.addView(button("Ativar Bluetooth", {
+                    try {
+                        startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                    } catch (_: Exception) {
+                        openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+                    }
+                }))
+            } else if (dpm.isDeviceOwnerApp(packageName) && Build.VERSION.SDK_INT >= 33) {
+                status.addView(button("Desativar Bluetooth", {
+                    try {
+                        val result = adapter.disable()
+                        if (!result) openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+                        else toast("Solicitando desligamento do Bluetooth.")
+                    } catch (_: Exception) {
+                        openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+                    }
+                }, Color.WHITE, purple))
+            } else {
+                status.addView(button("Gerenciar Bluetooth do Android", {
+                    openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+                }, Color.WHITE, purple))
+            }
+            body.addView(status)
+
+            body.addView(button(
+                if (try { adapter.isDiscovering } catch (_: Exception) { false }) "Interromper busca" else "Buscar dispositivos próximos",
+                {
+                    try {
+                        if (adapter.isDiscovering) {
+                            adapter.cancelDiscovery()
+                        } else {
+                            discoveredBluetoothDevices.clear()
+                            val started = adapter.startDiscovery()
+                            if (started) toast("Buscando dispositivos Bluetooth próximos…")
+                            else toast("Não foi possível iniciar a busca. Confira as permissões e tente novamente.")
+                        }
+                        showBluetoothPage()
+                    } catch (_: SecurityException) {
+                        requestPermissions(bluetoothPermissions(), 721)
+                    } catch (_: Exception) {
+                        toast("Falha ao buscar dispositivos Bluetooth.")
+                    }
+                }
+            ))
+
+            section(body, "Dispositivos pareados")
+            val bonded = try { adapter.bondedDevices?.toList()?.sortedBy { it.name ?: it.address } ?: emptyList() }
+                catch (_: SecurityException) { emptyList() }
+            if (bonded.isEmpty()) {
+                body.addView(label("Nenhum dispositivo pareado encontrado.", 13f, muted))
+            } else {
+                bonded.forEach { device ->
+                    val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
+                    body.addView(rowButton("ᛒ", name, device.address, {
+                        showBluetoothDeviceDialog(device, true)
+                    }, teal))
+                }
+            }
+
+            section(body, "Encontrados nesta busca")
+            val nearby = discoveredBluetoothDevices.values
+                .filter { device -> bonded.none { it.address == device.address } }
+                .sortedBy { try { it.name ?: it.address } catch (_: Exception) { it.address } }
+            if (nearby.isEmpty()) {
+                body.addView(label("Toque em Buscar dispositivos próximos para procurar acessórios.", 13f, muted))
+            } else {
+                nearby.forEach { device ->
+                    val name = try { device.name ?: "Dispositivo sem nome" } catch (_: Exception) { "Dispositivo Bluetooth" }
+                    body.addView(rowButton("＋", name, device.address, {
+                        showBluetoothDeviceDialog(device, false)
+                    }))
+                }
+            }
+            body.addView(label("O pareamento pode solicitar confirmação do Android. Conexões de áudio e periféricos são gerenciadas pelo perfil Bluetooth compatível do dispositivo.", 12f, muted))
+        }
+        body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
+        setContentView(pair.first)
+    }
+
+    private fun showBluetoothDeviceDialog(device: BluetoothDevice, paired: Boolean) {
+        val name = try { device.name ?: device.address } catch (_: Exception) { device.address }
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setMessage(if (paired) "Este dispositivo já está pareado com o Android." else "Deseja solicitar o pareamento com este dispositivo?")
+            .setPositiveButton(if (paired) "OK" else "Parear") { _, _ ->
+                if (!paired) {
+                    try {
+                        val requested = device.createBond()
+                        if (requested) toast("Solicitação de pareamento enviada ao Android.")
+                        else toast("Não foi possível solicitar o pareamento.")
+                    } catch (_: SecurityException) {
+                        requestPermissions(bluetoothPermissions(), 721)
+                    } catch (_: Exception) {
+                        toast("Falha ao solicitar pareamento.")
+                    }
+                }
+            }
+            .setNeutralButton("Configurações Bluetooth") { _, _ ->
+                openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun openPanelOrSettings(panelAction: String, fallbackAction: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startActivity(Intent(panelAction))
+            } else {
+                openSettings(fallbackAction)
+            }
+        } catch (_: Exception) {
+            openSettings(fallbackAction)
+        }
+    }
+
     private fun showControlCenter() {
         setBars(false)
         activePage = "control"
@@ -910,8 +1173,8 @@ class MainActivity : Activity() {
             useDefaultMargins = false
             layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        grid.addView(controlTile("⌁", "Wi-Fi", "Configurações da rede") { openSettings(Settings.ACTION_WIFI_SETTINGS) }, gridParams())
-        grid.addView(controlTile("ᛒ", "Bluetooth", "Acessórios próximos") { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }, gridParams())
+        grid.addView(controlTile("⌁", "Wi-Fi", "Configurações da rede") { openPanelOrSettings(Settings.Panel.ACTION_WIFI, Settings.ACTION_WIFI_SETTINGS) }, gridParams())
+        grid.addView(controlTile("ᛒ", "Bluetooth", "Acessórios próximos") { showBluetoothPage() }, gridParams())
         grid.addView(controlTile("☼", "Tela", "Brilho e rotação") { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }, gridParams())
         grid.addView(controlTile("♫", "Som", "Volume e áudio") { openSettings(Settings.ACTION_SOUND_SETTINGS) }, gridParams())
         grid.addView(controlTile("▤", "Bateria", getBatteryDescription()) { openSettings(Settings.ACTION_BATTERY_SAVER_SETTINGS) }, gridParams())
@@ -964,10 +1227,10 @@ class MainActivity : Activity() {
         val pair = pageScroll()
         val body = pair.second
         body.addView(pageHeader("Configurações", "Personalize seu dispositivo"))
-        body.addView(rowButton("⌁", "Conexões", "Wi-Fi e redes móveis", { openSettings(Settings.ACTION_WIFI_SETTINGS) }))
-        body.addView(rowButton("ᛒ", "Bluetooth", "Dispositivos pareados", { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS) }))
+        body.addView(rowButton("⌁", "Conexões", "Wi-Fi e redes móveis", { openPanelOrSettings(Settings.Panel.ACTION_INTERNET_CONNECTIVITY, Settings.ACTION_WIFI_SETTINGS) }))
+        body.addView(rowButton("ᛒ", "Bluetooth", "Dispositivos pareados", { showBluetoothPage() }))
         body.addView(rowButton("☼", "Tela", "Brilho, rotação e suspensão", { openSettings(Settings.ACTION_DISPLAY_SETTINGS) }))
-        body.addView(rowButton("♫", "Som e vibração", "Volume e preferências de áudio", { openSettings(Settings.ACTION_SOUND_SETTINGS) }))
+        body.addView(rowButton("♫", "Som e vibração", "Volume e preferências de áudio", { openPanelOrSettings(Settings.Panel.ACTION_VOLUME, Settings.ACTION_SOUND_SETTINGS) }))
         body.addView(rowButton("♧", "Notificações", "Acesso e preferências", { openSettings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }))
         body.addView(rowButton("▣", "Tela de bloqueio simulada", "Prévia do bloqueio JeaxLabs OS", { showLockScreen() }))
         body.addView(rowButton("↻", "Reiniciar interface", "Reproduzir a tela de inicialização", {

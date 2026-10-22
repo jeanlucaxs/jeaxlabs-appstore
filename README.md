@@ -1,19 +1,32 @@
-# JeaxLabs App Store
+# JeaxLabs OS e App Store
 
-Repositório inicial da loja de aplicativos do JeaxLabs OS v1.0.0.
+Este repositório contém o aplicativo JeaxLabs OS, o catálogo da loja e a automação de compilação/publicação. A versão Android única é definida por `version.properties`.
 
-## Objetivo
-- Publicar o catálogo de aplicativos disponíveis na loja.
-- Distribuir pacotes JeaxLabs no formato `.jxa`.
-- Fornecer metadados como identificador, nome, versão, descrição e URL do pacote.
-- Permitir que o cliente valide integridade e assinatura antes de instalar.
+## Política de versões
 
-## Arquivos
-- `catalog.json`: catálogo inicial, atualmente sem aplicativos publicados.
-- `packages/`: diretório reservado para pacotes publicados.
+Toda versão numerada distribuída do JeaxLabs OS deve ser oficial: sem publicações beta, preview ou release candidate. Artefatos de CI podem ser gerados para validação, mas são identificados como CI e não contam como versões distribuídas.
 
-## Segurança
-Não publique chaves privadas, senhas, tokens ou certificados de assinatura privados. Um certificado incluído dentro do próprio pacote não basta, sozinho, para provar a autenticidade do pacote; o cliente deve validar uma assinatura confiável e a integridade do conteúdo.
+- Política completa: [RELEASE_POLICY.md](RELEASE_POLICY.md)
+- Histórico de alterações: [CHANGELOG.md](CHANGELOG.md)
+- Versão e versionCode: [version.properties](version.properties)
+- Catálogo público: [catalog.json](catalog.json)
 
-## Estado
-Infraestrutura inicial. O formato final do pacote `.jxa` e a integração com o aplicativo Android ainda estão em desenvolvimento.
+## Como uma versão oficial é publicada
+
+1. Atualize `VERSION_NAME` e aumente `VERSION_CODE` em `version.properties`.
+2. Atualize `catalog.json` e adicione notas reais para a versão em `CHANGELOG.md`.
+3. Configure os secrets descritos em `RELEASE_POLICY.md`, inclusive a chave de assinatura Android persistente.
+4. Faça commit dessas alterações e envie uma tag `vX.Y.Z` que corresponda exatamente a `VERSION_NAME`.
+5. A workflow `Official Release` valida, compila, assina, verifica a APK, publica os artefatos na página Releases e sincroniza o manifesto do repositório `jeaxlabs-os-updates`.
+
+Se os requisitos de assinatura ou de metadados não forem cumpridos, a publicação oficial é bloqueada. Não se deve chamar uma APK debug de lançamento oficial.
+
+## Loja e pacotes
+
+- `tools/JeaxLabsAppPacker.py`: cria pacotes `.jxa`.
+- O empacotador de atualizações `tools/JeaxLabsUpdatePacker.py` fica no repositório `jeaxlabs-os-updates` e é incluído nos pacotes de build.
+- `catalog.json`: catálogo de aplicativos publicados; o catálogo permanece vazio até que pacotes reais sejam integrados.
+
+## Limites técnicos conhecidos
+
+O APK atual oferece uma experiência de launcher/kiosk sobre Android; não é uma ROM ou firmware independente. O fluxo de instalação/atualização dos formatos `.jxa` e `.jxu` ainda não está implementado dentro do APK. O comportamento de kiosk, bloqueio e políticas Device Owner precisa ser validado em dispositivo físico antes de declarar essa validação concluída.

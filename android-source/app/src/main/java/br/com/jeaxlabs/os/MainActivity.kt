@@ -535,6 +535,28 @@ class MainActivity : Activity() {
         bottomTools.addView(apps, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(bottomTools)
         setContentView(pair.first)
+        var swipeStartY = 0f
+        pair.first.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    swipeStartY = event.rawY
+                    false
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val movement = event.rawY - swipeStartY
+                    if (movement < -dp(75)) {
+                        showAppsPage()
+                        true
+                    } else if (movement > dp(75)) {
+                        showControlCenter()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                else -> false
+            }
+        }
     }
 
     private fun addHomeAppRow(parent: LinearLayout) {

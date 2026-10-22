@@ -2264,18 +2264,27 @@ class MainActivity : Activity() {
             val notes = updateData.optString("notes", updateData.optString("release_notes", "Atualização disponível."))
             val url = updateData.optString("url", updateData.optString("download_url", ""))
             val format = updateData.optString("package_type", if (url.substringBefore("?").substringBefore("#").endsWith(".jxu", true)) "system-update" else "")
+            val installedCode = try {
+                val current = packageManager.getPackageInfo(packageName, 0)
+                if (Build.VERSION.SDK_INT >= 28) current.longVersionCode else current.versionCode.toLong()
+            } catch (_: Exception) { 0L }
+            val updateCode = updateData.optLong("version_code", 0L)
+            val isSystemUpdate = format == "system-update" || url.substringBefore("?").substringBefore("#").endsWith(".jxu", true)
             state.addView(label(updateVersion, 15f, ink, true))
             state.addView(label(notes, 13f, muted))
-            val isSystemUpdate = format == "system-update" || url.substringBefore("?").substringBefore("#").endsWith(".jxu", true)
-            state.addView(button(if (isSystemUpdate) "Verificar e aplicar atualização .jxu" else "Baixar pacote", {
-                if (!url.startsWith("https://", true)) {
-                    toast("URL de atualização inválida.")
-                } else if (isSystemUpdate) {
-                    promptForJxuInstall(url, updateVersion, notes)
-                } else {
-                    downloadPackage(url, "JeaxLabsOS-update")
-                }
-            }))
+            if (updateCode > installedCode) {
+                state.addView(button(if (isSystemUpdate) "Verificar e aplicar atualização .jxu" else "Baixar pacote", {
+                    if (!url.startsWith("https://", true)) {
+                        toast("URL de atualização inválida.")
+                    } else if (isSystemUpdate) {
+                        promptForJxuInstall(url, updateVersion, notes)
+                    } else {
+                        downloadPackage(url, "JeaxLabsOS-update")
+                    }
+                }))
+            } else {
+                state.addView(label("Este dispositivo já está na versão mais recente do canal oficial.", 13f, teal, true))
+            }
         } else {
             state.addView(label("Nenhuma atualização foi publicada no canal.", 14f, teal, true))
         }

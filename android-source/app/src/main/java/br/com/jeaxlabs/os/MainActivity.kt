@@ -171,7 +171,7 @@ class MainActivity : Activity() {
         return super.dispatchTouchEvent(event)
     }
 
-    override fun onCreate(savedInstanceState: Bundle?)
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = background
         window.navigationBarColor = background
@@ -187,6 +187,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         applySystemUiMode()
+        checkForUpdatesIfDue()
         if (activePage == "bluetooth") {
             registerBluetoothReceiver()
             handler.post { if (activePage == "bluetooth") showBluetoothPage() }
@@ -698,7 +699,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(10), 0, dp(2))
         })
-        setContentView(root)
+        setScreenContent(root)
         if (!prefs.getBoolean("first_boot_permissions_requested", false)) {
             prefs.edit().putBoolean("first_boot_permissions_requested", true).apply()
             handler.postDelayed({ if (activePage == "welcome") requestInitialPermissions() }, 450)
@@ -730,7 +731,7 @@ class MainActivity : Activity() {
             sessionUnlocked = true
             showLockScreen()
         }, Color.WHITE, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
         if (!prefs.getBoolean("first_boot_permissions_requested", false)) {
             prefs.edit().putBoolean("first_boot_permissions_requested", true).apply()
             handler.postDelayed({ if (activePage == "setup") requestInitialPermissions() }, 450)
@@ -849,7 +850,7 @@ class MainActivity : Activity() {
         bottomTools.addView(locker, LinearLayout.LayoutParams(0, -2, 1f))
         bottomTools.addView(apps, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(bottomTools)
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun dockAction(symbol: String, title: String, action: () -> Unit): LinearLayout {
@@ -1039,7 +1040,7 @@ class MainActivity : Activity() {
                 else -> true
             }
         }
-        setContentView(root)
+        setScreenContent(root)
     }
 
     private fun gridParams(): GridLayout.LayoutParams = GridLayout.LayoutParams().apply {
@@ -1195,7 +1196,7 @@ class MainActivity : Activity() {
         updateResults()
         body.addView(space(12))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun pageHeader(title: String, subtitle: String): LinearLayout {
@@ -1348,7 +1349,7 @@ class MainActivity : Activity() {
         }
         body.addView(label("A confirmação segura de pareamento, quando exigida pelo Android, permanece sob controle do sistema.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showBluetoothDeviceDialog(device: BluetoothDevice, paired: Boolean) {
@@ -1374,11 +1375,12 @@ class MainActivity : Activity() {
 
     private fun requestInitialPermissions() {
         val required = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= 23) {
+            required.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             required.add(android.Manifest.permission.BLUETOOTH_SCAN)
             required.add(android.Manifest.permission.BLUETOOTH_CONNECT)
-        } else if (Build.VERSION.SDK_INT >= 23) {
-            required.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
         }
         if (Build.VERSION.SDK_INT >= 33) {
             required.add(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -1407,12 +1409,16 @@ class MainActivity : Activity() {
         val currentSsid = try {
             wifi.connectionInfo?.ssid?.trim('"')?.takeIf { it != "<unknown ssid>" } ?: "Não identificada"
         } catch (_: Exception) { "Não identificada" }
+        val locationGranted = Build.VERSION.SDK_INT < 23 || checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (locationGranted && enabled) {
+            try { wifi.startScan() } catch (_: Exception) {}
+        }
         val status = card(if (enabled) lavender else Color.WHITE, 18, 22)
         status.addView(label(if (enabled) "Wi-Fi ativado" else "Wi-Fi desativado", 19f, ink, true))
         status.addView(label(if (enabled) "Rede atual: $currentSsid" else "Nenhuma rede Wi-Fi ativa", 13f, muted))
         status.addView(label(
-            if (dpm.isDeviceOwnerApp(packageName)) "Controle de redes pelo Device Owner."
-            else "Antes do Device Owner, conectar a uma rede pode exigir a confirmação protegida do Android.",
+            if (hasWifiInternet()) "Internet conectada"
+            else "Conecte a uma rede com internet para consultar atualizações.",
             12f, muted
         ))
         status.addView(space(8))
@@ -1433,19 +1439,45 @@ class MainActivity : Activity() {
             }
         }))
         body.addView(status)
-        body.addView(rowButton("＋", "Conectar a uma rede", "Informe nome e senha dentro do JeaxLabs OS", { promptWifiConnection() }))
+        body.addView(rowButton("＋", "Conectar manualmente", "Informe o nome e a senha da rede", { promptWifiConnection() }))
+        body.addView(rowButton("⟳", "Buscar redes próximas", "Atualizar a lista de redes Wi-Fi", {
+            if (!locationGranted) requestInitialPermissions() else {
+                try { wifi.startScan() } catch (_: Exception) {}
+                handler.postDelayed({ if (activePage == "wifi") showWifiPage() }, 1200)
+            }
+        }))
         body.addView(rowButton("ᛒ", "Bluetooth", "Parear e administrar acessórios", { showBluetoothPage() }))
-        body.addView(label("O sistema operacional pode exibir uma confirmação protegida ao conectar-se a uma rede; ela não é uma Activity de Configurações iniciada pelo JeaxLabs.", 12f, muted))
+        val scanCard = card(Color.WHITE, 16, 20)
+        scanCard.addView(label("Redes próximas", 17f, ink, true))
+        if (!locationGranted) {
+            scanCard.addView(label("Permita o acesso a redes próximas para mostrar os nomes das redes.", 13f, muted))
+            scanCard.addView(button("Permitir acesso", { requestInitialPermissions() }, lavender, purple, 44))
+        } else {
+            val networks = try { wifi.scanResults.filter { it.SSID.isNotBlank() }.distinctBy { it.SSID }.sortedByDescending { it.level } } catch (_: Exception) { emptyList() }
+            if (networks.isEmpty()) {
+                scanCard.addView(label("Nenhuma rede encontrada nesta busca. Toque em Buscar redes próximas para tentar novamente.", 13f, muted))
+            } else {
+                networks.forEach { network ->
+                    val secure = network.capabilities.contains("WPA") || network.capabilities.contains("WEP") || network.capabilities.contains("SAE")
+                    scanCard.addView(rowButton(
+                        if (secure) "▣" else "◉", network.SSID,
+                        (if (secure) "Rede protegida" else "Rede aberta") + " · sinal " + network.level + " dBm",
+                        { promptWifiConnection(network.SSID) }
+                    ))
+                }
+            }
+        }
+        body.addView(scanCard)
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
-    private fun promptWifiConnection() {
+    private fun promptWifiConnection(prefillSsid: String = "") {
         val fields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
         }
-        val ssid = EditText(this).apply { hint = "Nome da rede (SSID)"; setSingleLine() }
+        val ssid = EditText(this).apply { hint = "Nome da rede (SSID)"; setSingleLine(); setText(prefillSsid) }
         val password = EditText(this).apply {
             hint = "Senha da rede (vazio para rede aberta)"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -1466,6 +1498,23 @@ class MainActivity : Activity() {
     }
 
     private fun connectWifi(ssid: String, password: String) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            try {
+                val suggestionBuilder = android.net.wifi.WifiNetworkSuggestion.Builder().setSsid(ssid)
+                if (password.isNotBlank()) suggestionBuilder.setWpa2Passphrase(password)
+                val suggestion = suggestionBuilder.build()
+                val result = wifiManager().addNetworkSuggestions(listOf(suggestion))
+                if (result == WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
+                    toast("Rede adicionada. O dispositivo conectará quando estiver disponível; confirme qualquer aviso exibido.")
+                    handler.postDelayed({ if (activePage == "wifi") showWifiPage() }, 1400)
+                } else {
+                    toast("Não foi possível adicionar esta rede. Verifique a senha e tente novamente.")
+                }
+            } catch (e: Exception) {
+                toast("Falha ao conectar: " + (e.message ?: "erro de rede"))
+            }
+            return
+        }
         if (dpm.isDeviceOwnerApp(packageName)) {
             try {
                 val config = WifiConfiguration().apply {
@@ -1583,7 +1632,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("↻", "Rotação automática", "Alternar rotação pela política do dispositivo", { toggleAutoRotate() }))
         body.addView(rowButton("🎨", "Aparência JeaxLabs", "Preferência visual interna", { showAppearanceDialog() }))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showScreenTimeoutDialog() {
@@ -1649,7 +1698,7 @@ class MainActivity : Activity() {
         addVolumeControl(body, audio, "Notificações", AudioManager.STREAM_NOTIFICATION)
         body.addView(label("Os volumes são aplicados ao Android sem abrir outra tela.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun addVolumeControl(parent: LinearLayout, audio: AudioManager, title: String, stream: Int) {
@@ -1688,7 +1737,7 @@ class MainActivity : Activity() {
         body.addView(item)
         body.addView(rowButton("◴", "Economia de energia", "Alternância depende da política do Android", { toast("Este firmware não expõe economia de energia ao APK comum.") }))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showAppsManagementPage() {
@@ -1702,7 +1751,7 @@ class MainActivity : Activity() {
         addAppGrid(body, cachedApps, 4)
         body.addView(label("Selecione um aplicativo para abrir.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showStoragePage() {
@@ -1726,7 +1775,7 @@ class MainActivity : Activity() {
             body.addView(label("Não foi possível ler o armazenamento.", 13f, muted))
         }
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showSecurityPage() {
@@ -1747,7 +1796,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("▣", "Tela de bloqueio JeaxLabs", "Prévia interna", { showLockScreen() }))
         body.addView(label("O APK não concede Device Owner a si próprio e não remove credenciais seguras já existentes. A tela JeaxLabs substitui o bloqueio apenas quando a política gerenciada consegue desabilitar a keyguard.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showDeveloperPage() {
@@ -1764,7 +1813,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("♧", "Permissões", "Solicitar permissões runtime", { requestInitialPermissions() }))
         body.addView(label("Depuração USB e Device Owner são protegidos pelo Android e precisam de confirmação ou provisionamento no dispositivo/PC.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun copyText(value: String, message: String) {
@@ -1794,7 +1843,7 @@ class MainActivity : Activity() {
         body.addView(hero)
         body.addView(button("Voltar aos aplicativos", { showAppsPage() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showControlCenter() {
@@ -1850,7 +1899,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("▣", "Bloquear tela", "Voltar à tela de bloqueio simulada", { showLockScreen() }))
         body.addView(rowButton("⚙", "Todas as configurações", "Personalização e recursos do sistema", { showSettingsPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun controlTile(symbol: String, title: String, subtitle: String, action: () -> Unit): LinearLayout {
@@ -1885,7 +1934,7 @@ class MainActivity : Activity() {
         body.addView(rowButton("↻", "Atualizações", "Consultar a versão mais recente", { showUpdatesPage() }))
         body.addView(rowButton("ⓘ", "Sobre o JeaxLabs OS", "Build, dispositivo e modo gerenciado", { showAboutPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showNotificationsPage() {
@@ -1926,7 +1975,7 @@ class MainActivity : Activity() {
         }
         body.addView(button("Solicitar permissões runtime", { requestInitialPermissions() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun readSavedNotifications(): JSONArray = try {
@@ -1963,7 +2012,7 @@ class MainActivity : Activity() {
         }
         body.addView(label("O app não consegue conceder Device Owner a si próprio nem apagar um PIN/padrão seguro já configurado no Android.", 12f, muted))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showDeviceOwnerHelp() {
@@ -2105,7 +2154,7 @@ class MainActivity : Activity() {
         body.addView(space(8))
         body.addView(button("Voltar às configurações", { showSettingsPage() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showJxaFingerprintDialog() {
@@ -2284,22 +2333,35 @@ class MainActivity : Activity() {
         body.addView(state)
         body.addView(button("Atualizar catálogo", { showStorePage() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
         thread {
             var error: String? = null
             var packages = JSONArray()
             var release = "—"
             try {
-                val connection = URL("https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-appstore/main/catalog.json").openConnection() as HttpURLConnection
+                val connection = URL("https://api.github.com/repos/jeanlucaxs/jeaxlabs-os-updates/contents/packages?ref=main").openConnection() as HttpURLConnection
                 connection.connectTimeout = 9000
                 connection.readTimeout = 9000
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("User-Agent", "JeaxLabsOS/1.1")
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                connection.setRequestProperty("User-Agent", "JeaxLabsOS/1.5")
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
                 connection.disconnect()
-                val json = JSONObject(text)
-                packages = json.optJSONArray("packages") ?: JSONArray()
-                release = json.optString("release", "—")
+                val listing = JSONArray(text)
+                packages = JSONArray()
+                for (i in 0 until listing.length()) {
+                    val file = listing.optJSONObject(i) ?: continue
+                    val filename = file.optString("name", "")
+                    if (file.optString("type") == "file" && filename.endsWith(".jxa", true)) {
+                        packages.put(JSONObject().apply {
+                            put("name", filename)
+                            put("version", "Detalhes verificados na instalação")
+                            put("description", "Pacote oficial criptografado · informações extraídas do APK")
+                            put("url", file.optString("download_url", ""))
+                        })
+                    }
+                }
+                release = "Diretório oficial /packages"
             } catch (e: Exception) {
                 error = e.message ?: "Sem conexão com o catálogo."
             }
@@ -2319,7 +2381,7 @@ class MainActivity : Activity() {
                     state.addView(space(8))
                     if (resultPackages.length() == 0) {
                         state.addView(label("Ainda não há aplicativos publicados.", 15f, ink, true))
-                        state.addView(label("Quando um pacote for adicionado ao catalog.json, ele aparecerá aqui.", 13f, muted))
+                        state.addView(label("Os arquivos .jxa colocados no diretório oficial /packages aparecerão aqui.", 13f, muted))
                     } else {
                         for (i in 0 until resultPackages.length()) {
                             val app = resultPackages.optJSONObject(i) ?: continue
@@ -2362,7 +2424,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun hasWifiInternet(): Boolean {
+        return try {
+            val connectivity = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivity.activeNetwork ?: return false
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+            wifiManager().isWifiEnabled &&
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun checkForUpdatesIfDue() {
+        if (!hasWifiInternet()) {
+            prefs.edit().putString("update_check_status", "Conecte o Wi-Fi a uma rede com internet para verificar atualizações.").apply()
+            return
+        }
         val now = System.currentTimeMillis()
         val last = prefs.getLong("last_update_check", 0L)
         if (now - last < 24L * 60L * 60L * 1000L) return
@@ -2436,12 +2516,15 @@ class MainActivity : Activity() {
         body.addView(state)
         body.addView(button("Aplicar pacote .jxu por URL", { promptForJxuUrl() }, lavender, purple))
         body.addView(button("Verificar novamente agora", {
-            prefs.edit().putLong("last_update_check", 0L).apply()
-            checkForUpdatesIfDue()
-            toast("Verificação iniciada; reabra esta tela em alguns segundos.")
+            if (!hasWifiInternet()) toast("Conecte o Wi-Fi a uma rede com internet antes de verificar.")
+            else {
+                prefs.edit().putLong("last_update_check", 0L).apply()
+                checkForUpdatesIfDue()
+                toast("Verificação iniciada; atualize esta tela em alguns segundos.")
+            }
         }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun showAboutPage() {
@@ -2466,7 +2549,7 @@ class MainActivity : Activity() {
 
         body.addView(space(12))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
-        setContentView(pair.first)
+        setScreenContent(pair.first)
     }
 
     private fun toast(message: String) {

@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
+  actions: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -68,3 +68,29 @@ jobs:
           path: JeaxLabsOS-v${{ steps.version.outputs.VERSION_NAME }}-CI-Build.zip
           if-no-files-found: error
           retention-days: 30
+      - name: Delete legacy CI artifacts that included public Python tools
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_CUTOFF: "2026-10-23T21:58:19Z"
+        run: |
+          set -euo pipefail
+          ARTIFACTS="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100")"
+          echo "$ARTIFACTS" | jq -r --arg cutoff "$LEGACY_CUTOFF" '
+            .artifacts[]
+            | select(.name | startswith("JeaxLabsOS-v"))
+            | select(.name | endswith("-CI"))
+            | select(.created_at < $cutoff)
+            | .id
+          ' | while read -r artifact_id; do
+            [ -n "$artifact_id" ] || continue
+            echo "Deleting legacy CI artifact $artifact_id"
+            curl --fail --silent --show-error -X DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          done

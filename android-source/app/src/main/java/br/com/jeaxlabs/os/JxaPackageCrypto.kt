@@ -124,6 +124,7 @@ object JxaPackageCrypto {
         }
         val manifestFile = readPackageEntries(context, packageFile)
         var apkFile: File? = null
+        var appPackageName = ""
         try {
             val manifestBytes = manifestFile.manifestBytes
                 ?: throw IllegalArgumentException("O pacote não contém manifest.json.")
@@ -265,7 +266,7 @@ object JxaPackageCrypto {
                     }
                 }
                 val installedApkInfo = validateApk(context, apkFile)
-                val appPackageName = installedApkInfo.packageName.orEmpty()
+                appPackageName = installedApkInfo.packageName.orEmpty()
                 require(appPackageName.isNotBlank()) { "O APK não informa um nome de pacote válido." }
                 if (normalizedFormat == "JXU") {
                     val parsedName = installedApkInfo.versionName ?: ""

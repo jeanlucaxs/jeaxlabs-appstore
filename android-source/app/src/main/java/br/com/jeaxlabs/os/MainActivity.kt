@@ -1403,20 +1403,14 @@ class MainActivity : Activity() {
             12f, muted
         ))
         status.addView(space(8))
-        status.addView(button(if (enabled) "Desativar Wi-Fi" else "Ativar Wi-Fi", {
-            if (!dpm.isDeviceOwnerApp(packageName)) {
-                showDeviceOwnerHelp()
-            } else {
-                try {
-                    @Suppress("DEPRECATION")
-                    val changed = wifi.setWifiEnabled(!wifi.isWifiEnabled)
-                    if (changed) {
-                        toast("Comando Wi-Fi enviado.")
-                        handler.postDelayed({ if (activePage == "wifi") showWifiPage() }, 900)
-                    } else toast("O Android recusou a alteração do Wi-Fi.")
-                } catch (_: Exception) {
-                    toast("Não foi possível alterar o Wi-Fi neste estado.")
-                }
+        status.addView(button(if (enabled) "Configurar Wi-Fi" else "Ativar Wi-Fi", {
+            try {
+                val panelIntent = if (Build.VERSION.SDK_INT >= 29) Intent(Settings.Panel.ACTION_WIFI)
+                else Intent(Settings.ACTION_WIFI_SETTINGS)
+                startActivity(panelIntent)
+            } catch (_: Exception) {
+                try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+                catch (_: Exception) { toast("Não foi possível abrir os controles de Wi-Fi.") }
             }
         }))
         body.addView(status)
@@ -1612,7 +1606,7 @@ class MainActivity : Activity() {
         brightness.addView(slider)
         body.addView(brightness)
         body.addView(rowButton("◷", "Tempo para apagar a tela", "Escolher suspensão automática", { showScreenTimeoutDialog() }))
-        body.addView(rowButton("↻", "Rotação automática", "Alternar rotação pela política do dispositivo", { toggleAutoRotate() }))
+        body.addView(rowButton("↻", "Rotação automática", "Alternar rotação", { toggleAutoRotate() }))
         body.addView(rowButton("🎨", "Aparência JeaxLabs", "Preferência visual interna", { showAppearanceDialog() }))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
         setScreenContent(pair.first)
@@ -1633,7 +1627,7 @@ class MainActivity : Activity() {
                     } catch (_: Exception) {
                         toast("O Android não permitiu alterar o tempo global.")
                     }
-                } else toast("Preferência salva para a simulação; controle global requer Device Owner.")
+                } else toast("Preferência salva.")
                 dialog.dismiss()
             }
             .setNegativeButton("Cancelar", null)
@@ -1862,7 +1856,7 @@ class MainActivity : Activity() {
         body.addView(grid)
 
         val brightness = card(Color.WHITE, 17, 20)
-        brightness.addView(label("Brilho da simulação", 15f, ink, true))
+        brightness.addView(label("Brilho", 15f, ink, true))
         brightness.addView(label("Ajusta o brilho enquanto o JeaxLabs OS está aberto.", 12f, muted))
         val slider = SeekBar(this).apply {
             max = 100
@@ -1878,8 +1872,7 @@ class MainActivity : Activity() {
         }
         brightness.addView(slider)
         body.addView(brightness)
-        body.addView(rowButton("⌑", "JeaxLabs Task Locker", "Bloqueio real com Device Owner quando disponível", { showTaskLockerPage() }))
-        body.addView(rowButton("▣", "Bloquear tela", "Voltar à tela de bloqueio simulada", { showLockScreen() }))
+        body.addView(rowButton("▣", "Bloquear tela", "Bloquear o acesso ao dispositivo", { showLockScreen() }))
         body.addView(rowButton("⚙", "Todas as configurações", "Personalização e recursos do sistema", { showSettingsPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setScreenContent(pair.first)

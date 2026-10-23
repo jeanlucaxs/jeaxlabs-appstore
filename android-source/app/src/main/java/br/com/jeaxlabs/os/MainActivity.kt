@@ -45,6 +45,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -1444,7 +1445,9 @@ class MainActivity : Activity() {
             }
         }
         body.addView(scanCard)
-        body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
+        body.addView(button("Voltar", {
+            if (wifiReturnPage == "setup") showSetup() else showSettingsPage()
+        }, lavender, purple))
         setScreenContent(pair.first)
     }
 
@@ -2281,95 +2284,177 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun storeGetText(address: String): String {
+        val connection = URL(address).openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 10000
+            connection.readTimeout = 15000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept", "application/vnd.github+json")
+            connection.setRequestProperty("User-Agent", "JeaxLabsOS/1.6")
+            val code = connection.responseCode
+            require(code in 200..299) { "HTTP $code ao consultar a Loja JeaxLabs." }
+            return connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun showStorePage() {
         setBars(false)
         activePage = "store"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("Loja JeaxLabs", "Catálogo oficial de aplicativos"))
+        body.addView(pageHeader("Loja JeaxLabs", "Aplicativos para instalar"))
         val intro = card(purpleDark, 18, 22)
         intro.addView(label("JEAXLABS STORE", 11f, Color.rgb(222, 211, 255), true))
         intro.addView(space(7))
-        intro.addView(label("Seus próximos aplicativos começam aqui.", 20f, Color.WHITE, true))
-        intro.addView(label("O catálogo é consultado diretamente no repositório oficial.", 13f, Color.rgb(232, 224, 255)))
+        intro.addView(label("Seus aplicativos, em um só lugar.", 20f, Color.WHITE, true))
+        intro.addView(label("Novos aplicativos aparecem quando a equipe os publica.", 13f, Color.rgb(232, 224, 255)))
         body.addView(intro)
         val state = card(Color.WHITE, 18, 20)
         state.addView(ProgressBar(this).apply { isIndeterminate = true }, LinearLayout.LayoutParams(dp(28), dp(28)))
         state.addView(space(10))
-        state.addView(label("Carregando catálogo…", 14f, ink, true))
+        state.addView(label("Carregando aplicativos…", 14f, ink, true))
         body.addView(state)
-        body.addView(button("Atualizar catálogo", { showStorePage() }, lavender, purple))
+        body.addView(button("Atualizar", { showStorePage() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setScreenContent(pair.first)
         thread {
             var error: String? = null
-            var packages = JSONArray()
-            var release = "—"
+            val packages = JSONArray()
             try {
-                val connection = URL("https://api.github.com/repos/jeanlucaxs/jeaxlabs-appstore/contents/packages?ref=main").openConnection() as HttpURLConnection
-                connection.connectTimeout = 9000
-                connection.readTimeout = 9000
-                connection.requestMethod = "GET"
-                connection.setRequestProperty("Accept", "application/vnd.github+json")
-                connection.setRequestProperty("User-Agent", "JeaxLabsOS/1.5")
-                val text = connection.inputStream.bufferedReader().use { it.readText() }
-                connection.disconnect()
-                val listing = JSONArray(text)
-                packages = JSONArray()
-                for (i in 0 until listing.length()) {
-                    val file = listing.optJSONObject(i) ?: continue
-                    val filename = file.optString("name", "")
-                    if (file.optString("type") == "file" && filename.endsWith(".jxa", true)) {
-                        packages.put(JSONObject().apply {
-                            put("name", filename)
-                            put("version", "Detalhes verificados na instalação")
-                            put("description", "Pacote oficial criptografado · informações extraídas do APK")
-                            put("url", file.optString("download_url", ""))
-                        })
+                val rootItems = JSONArray(storeGetText("https://api.github.com/repos/jeanlucaxs/jeaxlabs-appstore/contents/packages?ref=main"))
+                for (i in 0 until rootItems.length()) {
+                    val folder = rootItems.optJSONObject(i) ?: continue
+                    if (folder.optString("type") != "dir") continue
+                    val slug = folder.optString("name", "")
+                    if (slug.isBlank()) continue
+                    val encodedSlug = Uri.encode(slug)
+                    val items = JSONArray(storeGetText("https://api.github.com/repos/jeanlucaxs/jeaxlabs-appstore/contents/packages/$encodedSlug?ref=main"))
+                    val files = linkedMapOf<String, JSONObject>()
+                    for (index in 0 until items.length()) {
+                        val entry = items.optJSONObject(index) ?: continue
+                        files[entry.optString("name", "")] = entry
                     }
+                    val metadataFile = files["app.json"] ?: continue
+                    val metadataUrl = metadataFile.optString("download_url", "")
+                    if (!metadataUrl.startsWith("https://", true)) continue
+                    val metadata = JSONObject(storeGetText(metadataUrl))
+                    val packageFileName = metadata.optString("package_file", "app.jxa")
+                    val packageFile = files[packageFileName]
+                        ?: files.values.firstOrNull { it.optString("type") == "file" && it.optString("name").endsWith(".jxa", true) }
+                        ?: continue
+                    val packageUrl = packageFile.optString("download_url", "")
+                    if (!packageUrl.startsWith("https://", true)) continue
+                    val images = JSONArray()
+                    for (number in 1..25) {
+                        val imageName = String.format(Locale.ROOT, "%02d.png", number)
+                        val imageFile = files[imageName] ?: continue
+                        val imageUrl = imageFile.optString("download_url", "")
+                        if (imageUrl.startsWith("https://", true)) images.put(imageUrl)
+                    }
+                    packages.put(JSONObject().apply {
+                        put("id", slug)
+                        put("title", metadata.optString("title", "Aplicativo"))
+                        put("description", metadata.optString("description", ""))
+                        put("version", metadata.optString("version", "—"))
+                        put("developer", metadata.optString("developer", "JeaxLabs"))
+                        put("category", metadata.optString("category", "Aplicativo"))
+                        put("package_url", packageUrl)
+                        put("images", images)
+                    })
                 }
-                release = "Diretório oficial /packages"
             } catch (e: Exception) {
-                error = e.message ?: "Sem conexão com o catálogo."
+                error = e.message ?: "Não foi possível carregar a Loja."
             }
             val resultPackages = packages
-            val resultRelease = release
             val resultError = error
             handler.post {
                 if (activePage != "store") return@post
                 state.removeAllViews()
                 if (resultError != null) {
-                    state.addView(label("Não foi possível acessar a loja.", 16f, ink, true))
+                    state.addView(label("Não foi possível acessar a Loja.", 16f, ink, true))
                     state.addView(label(resultError, 12f, muted))
-                    state.addView(label("Confira a conexão Wi-Fi e tente novamente.", 13f, muted))
-                } else {
-                    state.addView(label("Catálogo conectado  ✓", 16f, teal, true))
-                    state.addView(label("Versão publicada: " + resultRelease, 12f, muted))
-                    state.addView(space(8))
-                    if (resultPackages.length() == 0) {
-                        state.addView(label("Ainda não há aplicativos publicados.", 15f, ink, true))
-                        state.addView(label("Os arquivos .jxa colocados no diretório oficial /packages aparecerão aqui.", 13f, muted))
-                    } else {
-                        for (i in 0 until resultPackages.length()) {
-                            val app = resultPackages.optJSONObject(i) ?: continue
-                            val appCard = card(background, 14, 16)
-                            appCard.addView(label(app.optString("name", app.optString("id", "Aplicativo")), 15f, ink, true))
-                            appCard.addView(label("Versão " + app.optString("version", "—"), 12f, purple))
-                            appCard.addView(label(app.optString("description", ""), 12f, muted))
-                            val packageUrl = app.optString("url", app.optString("package_url", ""))
-                            val packageName = app.optString("name", "JeaxLabs-App")
-                            val isJxa = packageUrl.substringBefore("?").substringBefore("#").endsWith(".jxa", true)
-                            if (packageUrl.startsWith("https://") && isJxa) {
-                                appCard.addView(button("Verificar e instalar .jxa", {
-                                    promptForJxaInstall(packageUrl, packageName)
-                                }, purple, Color.WHITE, 43, 13))
-                            } else if (packageUrl.startsWith("https://")) {
-                                appCard.addView(button("Baixar pacote", { downloadPackage(packageUrl, packageName) }, purple, Color.WHITE, 43, 13))
-                            }
-                            state.addView(appCard)
+                    state.addView(label("Confira o Wi-Fi e tente novamente.", 13f, muted))
+                    return@post
+                }
+                if (resultPackages.length() == 0) {
+                    state.addView(label("Nenhum aplicativo publicado ainda.", 15f, ink, true))
+                    state.addView(label("Cada aplicativo precisa ter sua pasta, app.json e arquivo .jxa.", 13f, muted))
+                    return@post
+                }
+                for (i in 0 until resultPackages.length()) {
+                    val app = resultPackages.optJSONObject(i) ?: continue
+                    val appCard = card(background, 16, 18)
+                    appCard.alpha = 0f
+                    appCard.translationY = dp(10).toFloat()
+                    appCard.animate().alpha(1f).translationY(0f).setStartDelay((i * 45L).coerceAtMost(250L)).setDuration(240).start()
+                    val title = app.optString("title", "Aplicativo").ifBlank { "Aplicativo" }
+                    appCard.addView(label(title, 18f, ink, true))
+                    val version = app.optString("version", "—")
+                    val developer = app.optString("developer", "JeaxLabs")
+                    val category = app.optString("category", "Aplicativo")
+                    appCard.addView(label("$category  ·  v$version  ·  $developer", 11f, purple))
+                    val imageUrls = app.optJSONArray("images") ?: JSONArray()
+                    if (imageUrls.length() > 0) {
+                        val gallery = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
                         }
+                        val galleryScroll = HorizontalScrollView(this).apply {
+                            isHorizontalScrollBarEnabled = false
+                            visibility = View.GONE
+                            addView(gallery, HorizontalScrollView.LayoutParams(-2, dp(126)))
+                        }
+                        for (imageIndex in 0 until imageUrls.length()) {
+                            val imageUrl = imageUrls.optString(imageIndex)
+                            val image = ImageView(this).apply {
+                                visibility = View.GONE
+                                scaleType = ImageView.ScaleType.CENTER_CROP
+                                background = rounded(Color.WHITE, 10)
+                                layoutParams = LinearLayout.LayoutParams(dp(104), dp(118)).apply {
+                                    rightMargin = dp(8)
+                                }
+                            }
+                            gallery.addView(image)
+                            thread {
+                                var bitmap: android.graphics.Bitmap? = null
+                                try {
+                                    val connection = URL(imageUrl).openConnection() as HttpURLConnection
+                                    connection.connectTimeout = 8000
+                                    connection.readTimeout = 12000
+                                    connection.setRequestProperty("User-Agent", "JeaxLabsOS/1.6")
+                                    connection.inputStream.use { bitmap = BitmapFactory.decodeStream(it) }
+                                    connection.disconnect()
+                                } catch (_: Exception) {}
+                                val decoded = bitmap
+                                handler.post {
+                                    if (decoded != null && activePage == "store") {
+                                        image.setImageBitmap(decoded)
+                                        image.visibility = View.VISIBLE
+                                        galleryScroll.visibility = View.VISIBLE
+                                    } else {
+                                        image.visibility = View.GONE
+                                    }
+                                }
+                            }
+                        }
+                        appCard.addView(galleryScroll, LinearLayout.LayoutParams(-1, dp(126)).apply {
+                            topMargin = dp(10)
+                            bottomMargin = dp(10)
+                        })
                     }
-                    state.addView(label("Os detalhes do aplicativo são conferidos a partir do APK contido no pacote antes da instalação.", 11f, muted))
+                    val description = app.optString("description", "")
+                    if (description.isNotBlank()) appCard.addView(label(description, 13f, muted))
+                    appCard.addView(space(10))
+                    val packageUrl = app.optString("package_url", "")
+                    if (packageUrl.startsWith("https://", true) && packageUrl.substringBefore("?").substringBefore("#").endsWith(".jxa", true)) {
+                        appCard.addView(button("Instalar", {
+                            installJxaFromUrl(packageUrl)
+                        }, purple, Color.WHITE, 46, 14))
+                    }
+                    state.addView(appCard)
                 }
             }
         }

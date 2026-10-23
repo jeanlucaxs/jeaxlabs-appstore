@@ -2339,7 +2339,7 @@ class MainActivity : Activity() {
             var packages = JSONArray()
             var release = "—"
             try {
-                val connection = URL("https://api.github.com/repos/jeanlucaxs/jeaxlabs-os-updates/contents/packages?ref=main").openConnection() as HttpURLConnection
+                val connection = URL("https://api.github.com/repos/jeanlucaxs/jeaxlabs-appstore/contents/packages?ref=main").openConnection() as HttpURLConnection
                 connection.connectTimeout = 9000
                 connection.readTimeout = 9000
                 connection.requestMethod = "GET"

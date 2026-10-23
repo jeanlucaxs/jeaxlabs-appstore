@@ -37,6 +37,7 @@ import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -77,6 +78,9 @@ class MainActivity : Activity() {
     private var cachedApps: List<ResolveInfo> = emptyList()
     private var kioskStartPending = false
     private var screenReceiverRegistered = false
+    private var topSwipeStartY = 0f
+    private var topSwipeEligible = false
+    private var topSwipeTriggered = false
     private var screenOffPending = false
     private var wifiRequestCallback: ConnectivityManager.NetworkCallback? = null
     private var discoveredBluetoothDevices = linkedMapOf<String, BluetoothDevice>()
@@ -117,6 +121,12 @@ class MainActivity : Activity() {
                     screenOffPending = true
                     sessionUnlocked = false
                 }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    if (prefs.getBoolean("maintenance_active", false)) {
+                        prefs.edit().putBoolean("maintenance_active", false).apply()
+                        handler.post { showHome() }
+                    }
+                }
                 Intent.ACTION_SCREEN_ON -> {
                     if (screenOffPending) {
                         screenOffPending = false
@@ -133,7 +143,35 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (activePage == "home") {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    topSwipeStartY = event.rawY
+                    topSwipeEligible = event.rawY <= dp(42)
+                    topSwipeTriggered = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (topSwipeEligible && !topSwipeTriggered && event.rawY - topSwipeStartY >= dp(90)) {
+                        topSwipeTriggered = true
+                        showControlCenter()
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (topSwipeTriggered) {
+                        topSwipeEligible = false
+                        topSwipeTriggered = false
+                        return true
+                    }
+                    topSwipeEligible = false
+                }
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?)
         super.onCreate(savedInstanceState)
         window.statusBarColor = background
         window.navigationBarColor = background
@@ -183,6 +221,7 @@ class MainActivity : Activity() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
         try {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_EXPORTED)
@@ -214,7 +253,11 @@ class MainActivity : Activity() {
         if (!dpm.isDeviceOwnerApp(packageName)) return false
         prefs.edit().putBoolean("kiosk_enabled", true).apply()
         return try {
-            dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
+            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val launchableUserApps = packageManager.queryIntentActivities(launcherIntent, 0)
+                .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
+                .map { it.activityInfo.packageName }
+            dpm.setLockTaskPackages(adminComponent, (launchableUserApps + packageName).distinct().toTypedArray())
             if (Build.VERSION.SDK_INT >= 28) dpm.setLockTaskFeatures(adminComponent, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
             else dpm.setLockTaskFeatures(adminComponent, 0)
             val keyguardDisabled = dpm.setKeyguardDisabled(adminComponent, true)
@@ -281,6 +324,12 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.hasExtra("jeax_maintenance")) {
+            val enabled = intent.getBooleanExtra("jeax_maintenance", false)
+            prefs.edit().putBoolean("maintenance_active", enabled).apply()
+            if (enabled) showMaintenanceScreen() else showHome()
+            return
+        }
         if (prefs.getBoolean("setup_done", false) && !prefs.getBoolean("kiosk_enabled", false)) {
             if (activePage == "lockscreen") {
                 showLockScreen()
@@ -289,6 +338,28 @@ class MainActivity : Activity() {
                 showHome()
             }
         }
+    }
+
+    private fun showMaintenanceScreen() {
+        setBars(true)
+        activePage = "maintenance"
+        sessionUnlocked = false
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(30), dp(30), dp(30), dp(30))
+            background = gradient(Color.rgb(28, 25, 53), Color.rgb(82, 55, 140))
+        }
+        root.addView(logoOrMark(210, 72))
+        root.addView(space(28))
+        root.addView(label("MANUTENÇÃO", 24f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
+        root.addView(space(12))
+        root.addView(label("Computador conectado. A interface será liberada quando a conexão USB for encerrada.", 14f, Color.rgb(234, 226, 255)).apply { gravity = Gravity.CENTER })
+        root.addView(space(24))
+        root.addView(ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+        }, LinearLayout.LayoutParams(dp(38), dp(38)))
+        setScreenContent(root)
     }
 
     private fun currentVersionName(): String = try {
@@ -496,6 +567,89 @@ class MainActivity : Activity() {
         return frame
     }
 
+    private fun setScreenContent(content: View) {
+        val container = FrameLayout(this)
+        container.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (activePage !in setOf("startup", "welcome", "setup", "lockscreen", "maintenance")) {
+            val nav = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(5), dp(8), dp(5))
+                background = rounded(Color.rgb(251, 249, 255), 18)
+                elevation = dp(8).toFloat()
+            }
+            nav.addView(navItem("⌂", "Início") {
+                if (activePage != "home" && activePage != "lockscreen") showHome()
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            nav.addView(navItem("▣", "Recentes") {
+                if (activePage != "lockscreen") showRecentAppsPage()
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            nav.addView(navItem("‹", "Voltar") {
+                if (activePage != "lockscreen") onBackPressed()
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            val power = navItem("⏻", "Energia") {}
+            var longPressFired = false
+            val longPress = Runnable {
+                longPressFired = true
+                showPowerActions()
+            }
+            power.setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        longPressFired = false
+                        handler.postDelayed(longPress, 3000)
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        handler.removeCallbacks(longPress)
+                        if (!longPressFired) toast("Segure por 3 segundos para abrir as opções.")
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        handler.removeCallbacks(longPress)
+                        true
+                    }
+                    else -> true
+                }
+            }
+            nav.addView(power, LinearLayout.LayoutParams(0, -1, 1f))
+            content.setPadding(content.paddingLeft, content.paddingTop, content.paddingRight, content.paddingBottom + dp(52))
+            container.addView(nav, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52), Gravity.BOTTOM))
+        }
+        super.setContentView(container)
+        content.alpha = 0f
+        content.animate().alpha(1f).setDuration(220).start()
+    }
+
+    private fun navItem(symbol: String, title: String, action: () -> Unit): LinearLayout {
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
+        }
+        item.addView(label(symbol, 22f, purple, true).apply { gravity = Gravity.CENTER })
+        item.addView(label(title, 10f, muted, true).apply { gravity = Gravity.CENTER })
+        return item
+    }
+
+    private fun showPowerActions() {
+        AlertDialog.Builder(this)
+            .setTitle("Opções de energia")
+            .setItems(arrayOf("Bloquear tela", "Reiniciar interface", "Cancelar")) { dialog, which ->
+                when (which) {
+                    0 -> showLockScreen()
+                    1 -> {
+                        sessionUnlocked = false
+                        showStartup()
+                    }
+                }
+                dialog.dismiss()
+            }
+            .show()
+    }
+
     private fun showStartup() {
         setBars(true)
         activePage = "startup"
@@ -511,7 +665,7 @@ class MainActivity : Activity() {
         root.addView(space(26))
         val progress = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE) }
         root.addView(progress, LinearLayout.LayoutParams(dp(46), dp(4)))
-        setContentView(root)
+        setScreenContent(root)
         handler.postDelayed({
             appReady = true
             if (dpm.isDeviceOwnerApp(packageName)) {
@@ -608,16 +762,6 @@ class MainActivity : Activity() {
         titleBlock.addView(label("JEAXLABS OS", 12f, Color.WHITE, true))
         titleBlock.addView(label(SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, 11f, Color.rgb(244, 235, 255)))
         top.addView(titleBlock)
-        top.addView(TextView(this).apply {
-            text = "☷"
-            textSize = 23f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = rounded(Color.argb(50, 255, 255, 255), 18)
-            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46))
-            contentDescription = "Central de controle"
-            setOnClickListener { showControlCenter() }
-        })
         body.addView(top)
 
         body.addView(space(76))
@@ -682,24 +826,15 @@ class MainActivity : Activity() {
                 topMargin = dp(3)
             }
         }
-        pickHomeApps(
-            listOf(
-                listOf("com.samsung.android.dialer", "com.google.android.dialer", "com.android.dialer", "Telefone"),
-                listOf("com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.messaging", "Mensagens"),
-                listOf("com.sec.android.app.sbrowser", "com.android.chrome", "Navegador", "Internet"),
-                listOf("com.sec.android.app.camera", "com.android.camera2", "Câmera", "Camera")
-            ), 4
-        ).forEach { info -> dock.addView(dockShortcut(info), LinearLayout.LayoutParams(0, -1, 1f)) }
+        dock.addView(dockAction("▦", "Loja") { showStorePage() }, LinearLayout.LayoutParams(0, -1, 1f))
+        dock.addView(dockAction("◈", "Apps") { showAppsPage() }, LinearLayout.LayoutParams(0, -1, 1f))
+        dock.addView(dockAction("⌁", "Wi-Fi") { showWifiPage() }, LinearLayout.LayoutParams(0, -1, 1f))
+        dock.addView(dockAction("⚙", "Ajustes") { showSettingsPage() }, LinearLayout.LayoutParams(0, -1, 1f))
         body.addView(dock)
 
         val bottomTools = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-        }
-        val controls = label("Central", 12f, Color.WHITE, true).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setOnClickListener { showControlCenter() }
         }
         val locker = label("Bloquear tela", 12f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
@@ -711,33 +846,23 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(8), dp(8), dp(8))
             setOnClickListener { showAppsPage() }
         }
-        bottomTools.addView(controls, LinearLayout.LayoutParams(0, -2, 1f))
         bottomTools.addView(locker, LinearLayout.LayoutParams(0, -2, 1f))
         bottomTools.addView(apps, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(bottomTools)
         setContentView(pair.first)
-        var swipeStartY = 0f
-        pair.first.setOnTouchListener { _, event ->
-            when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    swipeStartY = event.rawY
-                    false
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    val movement = event.rawY - swipeStartY
-                    if (movement < -dp(75)) {
-                        showAppsPage()
-                        true
-                    } else if (movement > dp(75)) {
-                        showControlCenter()
-                        true
-                    } else {
-                        false
-                    }
-                }
-                else -> false
-            }
+    }
+
+    private fun dockAction(symbol: String, title: String, action: () -> Unit): LinearLayout {
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
         }
+        item.addView(label(symbol, 25f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
+        item.addView(label(title, 11f, Color.WHITE, true).apply { gravity = Gravity.CENTER })
+        return item
     }
 
     private fun addHomeAppRow(parent: LinearLayout) {
@@ -947,6 +1072,7 @@ class MainActivity : Activity() {
         return try {
             packageManager.queryIntentActivities(intent, 0)
                 .filter { it.activityInfo.packageName != packageName }
+                .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
                 .distinctBy { it.activityInfo.packageName }
                 .sortedBy { it.loadLabel(packageManager).toString().lowercase(Locale.getDefault()) }
         } catch (_: Exception) {
@@ -998,7 +1124,39 @@ class MainActivity : Activity() {
     }
 
     private fun launchApp(packageNameToOpen: String) {
-        showAppPreview(packageNameToOpen)
+        val intent = packageManager.getLaunchIntentForPackage(packageNameToOpen)
+        if (intent == null) {
+            toast("Este aplicativo não pode ser aberto.")
+            return
+        }
+        val saved = prefs.getString("recent_packages", "").orEmpty().split("\n").filter { it.isNotBlank() && it != packageNameToOpen }
+        prefs.edit().putString("recent_packages", (listOf(packageNameToOpen) + saved).take(8).joinToString("\n")).apply()
+        if (dpm.isDeviceOwnerApp(packageName)) {
+            try {
+                val allowed = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                    .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
+                    .map { it.activityInfo.packageName } + packageName
+                dpm.setLockTaskPackages(adminComponent, allowed.distinct().toTypedArray())
+            } catch (_: Exception) {}
+        }
+        try { startActivity(intent) } catch (_: Exception) { toast("Não foi possível abrir este aplicativo.") }
+    }
+
+    private fun showRecentAppsPage() {
+        setBars(false)
+        activePage = "recent"
+        val pair = pageScroll()
+        val body = pair.second
+        body.addView(pageHeader("Recentes", "Aplicativos abertos por você"))
+        val packages = prefs.getString("recent_packages", "").orEmpty().split("\n").filter { it.isNotBlank() }
+        val allApps = loadLaunchableApps().associateBy { it.activityInfo.packageName }
+        val recent = packages.mapNotNull { allApps[it] }
+        if (recent.isEmpty()) body.addView(label("Nenhum aplicativo aberto recentemente.", 14f, muted))
+        else recent.forEach { info ->
+            body.addView(rowButton("◈", info.loadLabel(packageManager).toString(), info.activityInfo.packageName, { launchApp(info.activityInfo.packageName) }))
+        }
+        body.addView(button("Ver aplicativos", { showAppsPage() }, lavender, purple))
+        setScreenContent(pair.first)
     }
 
     private fun showAppsPage(queryText: String = "") {

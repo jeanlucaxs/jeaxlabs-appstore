@@ -16,6 +16,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ResolveInfo
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -83,6 +84,7 @@ class MainActivity : Activity() {
     private var topSwipeTriggered = false
     private var screenOffPending = false
     private var wifiRequestCallback: ConnectivityManager.NetworkCallback? = null
+    private var wifiReturnPage = "settings"
     private var discoveredBluetoothDevices = linkedMapOf<String, BluetoothDevice>()
     private var bluetoothReceiverRegistered = false
     private val bluetoothReceiver = object : BroadcastReceiver() {
@@ -254,11 +256,8 @@ class MainActivity : Activity() {
         if (!dpm.isDeviceOwnerApp(packageName)) return false
         prefs.edit().putBoolean("kiosk_enabled", true).apply()
         return try {
-            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val launchableUserApps = packageManager.queryIntentActivities(launcherIntent, 0)
-                .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
-                .map { it.activityInfo.packageName }
-            dpm.setLockTaskPackages(adminComponent, (launchableUserApps + packageName).distinct().toTypedArray())
+            val launchableJxaApps = approvedJxaPackages()
+            dpm.setLockTaskPackages(adminComponent, (launchableJxaApps + packageName).distinct().toTypedArray())
             if (Build.VERSION.SDK_INT >= 28) dpm.setLockTaskFeatures(adminComponent, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
             else dpm.setLockTaskFeatures(adminComponent, 0)
             val keyguardDisabled = dpm.setKeyguardDisabled(adminComponent, true)
@@ -317,7 +316,13 @@ class MainActivity : Activity() {
         when (activePage) {
             "home", "lockscreen", "startup" -> { }
             "welcome" -> showWelcome()
-            "setup" -> showWelcome()
+            "setup" -> {
+                if (!hasWifiInternet()) {
+                    toast("A configuração exige Wi-Fi com internet.")
+                    openWifiFromSetup()
+                }
+            }
+            "wifi" -> if (wifiReturnPage == "setup") showSetup() else showSettingsPage()
             else -> showHome()
         }
     }
@@ -527,16 +532,10 @@ class MainActivity : Activity() {
             applySystemUiMode()
             return
         }
-        if (darkSurface) {
-            window.statusBarColor = Color.rgb(49, 39, 94)
-            window.navigationBarColor = Color.rgb(38, 31, 69)
-            window.decorView.systemUiVisibility = 0
-        } else {
-            window.statusBarColor = background
-            window.navigationBarColor = background
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
+        window.navigationBarColor = Color.BLACK
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            (if (darkSurface) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
     }
 
     private fun logoOrMark(width: Int, height: Int): View {
@@ -571,55 +570,34 @@ class MainActivity : Activity() {
     private fun setScreenContent(content: View) {
         val container = FrameLayout(this)
         container.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        if (activePage !in setOf("startup", "welcome", "setup", "lockscreen", "maintenance")) {
+        if (activePage != "startup") {
             val nav = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-                setPadding(dp(8), dp(5), dp(8), dp(5))
-                background = rounded(Color.rgb(251, 249, 255), 18)
+                setPadding(dp(24), dp(4), dp(24), dp(4))
+                background = if (activePage in setOf("welcome", "setup", "lockscreen", "maintenance"))
+                    rounded(Color.rgb(24, 22, 32), 0)
+                else rounded(Color.rgb(251, 249, 255), 0)
                 elevation = dp(8).toFloat()
             }
-            nav.addView(navItem("⌂", "Início") {
-                if (activePage != "home" && activePage != "lockscreen") showHome()
-            }, LinearLayout.LayoutParams(0, -1, 1f))
-            nav.addView(navItem("▣", "Recentes") {
-                if (activePage != "lockscreen") showRecentAppsPage()
-            }, LinearLayout.LayoutParams(0, -1, 1f))
-            nav.addView(navItem("‹", "Voltar") {
-                if (activePage != "lockscreen") onBackPressed()
-            }, LinearLayout.LayoutParams(0, -1, 1f))
-            val power = navItem("⏻", "Energia") {}
-            var longPressFired = false
-            val longPress = Runnable {
-                longPressFired = true
-                showPowerActions()
-            }
-            power.setOnTouchListener { _, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        longPressFired = false
-                        handler.postDelayed(longPress, 3000)
-                        true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        handler.removeCallbacks(longPress)
-                        if (!longPressFired) toast("Segure por 3 segundos para abrir as opções.")
-                        true
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        handler.removeCallbacks(longPress)
-                        true
-                    }
-                    else -> true
-                }
-            }
-            nav.addView(power, LinearLayout.LayoutParams(0, -1, 1f))
-            content.setPadding(content.paddingLeft, content.paddingTop, content.paddingRight, content.paddingBottom + dp(52))
-            container.addView(nav, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52), Gravity.BOTTOM))
+            val locked = activePage in setOf("welcome", "setup", "lockscreen", "maintenance")
+            nav.addView(navItem("□", "", {
+                if (!locked && prefs.getBoolean("setup_done", false)) showRecentAppsPage()
+            }), LinearLayout.LayoutParams(0, -1, 1f))
+            nav.addView(navItem("●", "", {
+                if (!locked && prefs.getBoolean("setup_done", false)) showHome()
+            }), LinearLayout.LayoutParams(0, -1, 1f))
+            nav.addView(navItem("◁", "", {
+                if (!locked && prefs.getBoolean("setup_done", false)) onBackPressed()
+                else if (activePage == "setup" && !hasWifiInternet()) toast("Conecte o Wi-Fi para continuar.")
+            }), LinearLayout.LayoutParams(0, -1, 1f))
+            content.setPadding(content.paddingLeft, content.paddingTop, content.paddingRight, content.paddingBottom + dp(54))
+            container.addView(nav, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54), Gravity.BOTTOM))
         }
         super.setContentView(container)
         content.alpha = 0f
-        content.animate().alpha(1f).setDuration(220).start()
+        content.translationY = dp(6).toFloat()
+        content.animate().alpha(1f).translationY(0f).setDuration(240).start()
     }
 
     private fun navItem(symbol: String, title: String, action: () -> Unit): LinearLayout {
@@ -654,27 +632,24 @@ class MainActivity : Activity() {
     private fun showStartup() {
         setBars(true)
         activePage = "startup"
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(28), dp(32), dp(28), dp(32))
-            background = gradient(Color.rgb(35, 27, 69), Color.rgb(115, 76, 194))
-        }
-        root.addView(logoOrMark(210, 76))
-        root.addView(space(22))
-        root.addView(label("Preparando seu espaço", 14f, Color.rgb(235, 228, 255)).apply { gravity = Gravity.CENTER })
-        root.addView(space(26))
-        val progress = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE) }
-        root.addView(progress, LinearLayout.LayoutParams(dp(46), dp(4)))
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        root.addView(
+            logoOrMark(236, 90),
+            FrameLayout.LayoutParams(dp(236), dp(90), Gravity.CENTER)
+        )
         setScreenContent(root)
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(850).start()
         handler.postDelayed({
             appReady = true
             if (dpm.isDeviceOwnerApp(packageName)) {
                 ensureManagedSystemMode()
                 if (!isSystemLockTaskActive()) startManagedLockTask()
             }
-            if (prefs.getBoolean("setup_done", false)) showLockScreen() else showWelcome()
-        }, 900)
+            if (prefs.getBoolean("setup_done", false)) {
+                if (hasWifiInternet()) showLockScreen() else showSetup()
+            } else showWelcome()
+        }, 15_000)
     }
 
     private fun showWelcome() {
@@ -711,31 +686,42 @@ class MainActivity : Activity() {
         activePage = "setup"
         val pair = pageScroll()
         val body = pair.second
+        val connected = hasWifiInternet()
         body.addView(brandMark(48))
         body.addView(space(20))
         body.addView(label("Vamos preparar\ntudo para você.", 30f, ink, true))
-        body.addView(label("Conecte-se ao Wi-Fi para acessar a Loja JeaxLabs e consultar atualizações.", 14f, muted))
-        body.addView(space(18))
-        body.addView(rowButton("⌁", "Wi-Fi", "Conectar a uma rede dentro do JeaxLabs OS", { showWifiPage() }))
-        body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios sem abrir Configurações", { showBluetoothPage() }))
-        body.addView(rowButton("♧", "Notificações", "Ver avisos já autorizados", { showNotificationsPage() }))
+        body.addView(label("Conecte o Wi-Fi a uma rede com internet para concluir a configuração.", 14f, muted))
+        body.addView(space(12))
+        body.addView(label(
+            if (connected) "Wi-Fi e internet conectados ✓" else "É obrigatório conectar ao Wi-Fi antes de continuar.",
+            13f, if (connected) teal else Color.rgb(176, 85, 37), true
+        ))
+        body.addView(space(10))
+        body.addView(rowButton("⌁", "Wi-Fi e internet", if (connected) "Conectado — toque para trocar de rede" else "Escolha uma rede e conecte-se à internet", { openWifiFromSetup() }))
+        body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios", { showBluetoothPage() }))
+        body.addView(rowButton("♧", "Notificações", "Ver avisos autorizados", { showNotificationsPage() }))
         body.addView(button("Preparar permissões", { requestInitialPermissions() }, lavender, purple))
-        body.addView(space(7))
+        body.addView(space(10))
         body.addView(button("Concluir configuração", {
-            prefs.edit().putBoolean("setup_done", true).apply()
-            sessionUnlocked = true
-            showLockScreen()
+            if (!hasWifiInternet()) {
+                toast("Conecte o Wi-Fi à internet antes de continuar.")
+                openWifiFromSetup()
+            } else {
+                prefs.edit().putBoolean("setup_done", true).apply()
+                sessionUnlocked = true
+                showLockScreen()
+            }
         }, purple, Color.WHITE))
-        body.addView(button("Continuar e configurar depois", {
-            prefs.edit().putBoolean("setup_done", true).apply()
-            sessionUnlocked = true
-            showLockScreen()
-        }, Color.WHITE, purple))
         setScreenContent(pair.first)
         if (!prefs.getBoolean("first_boot_permissions_requested", false)) {
             prefs.edit().putBoolean("first_boot_permissions_requested", true).apply()
             handler.postDelayed({ if (activePage == "setup") requestInitialPermissions() }, 450)
         }
+    }
+
+    private fun openWifiFromSetup() {
+        wifiReturnPage = "setup"
+        showWifiPage()
     }
 
     private fun showHome() {
@@ -766,29 +752,13 @@ class MainActivity : Activity() {
         body.addView(top)
 
         body.addView(space(76))
-        val weather = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(7), dp(2), dp(7))
-            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(26)
-            }
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { showWeatherDialog() }
-        }
-        weather.addView(label("☀", 45f, Color.rgb(255, 222, 119), true))
-        val weatherInfo = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-        }
-        weatherInfo.addView(label("Clima local", 25f, Color.WHITE))
-        val city = prefs.getString("weather_city", "")?.trim().orEmpty()
-        weatherInfo.addView(label(if (city.isBlank()) "Seu espaço pessoal" else city, 14f, Color.rgb(245, 235, 255)))
-        weather.addView(weatherInfo)
-        weather.addView(label("›", 27f, Color.WHITE))
-        body.addView(weather)
+        val statusCard = card(Color.argb(52, 255, 255, 255), 18, 16)
+        statusCard.addView(label(if (hasWifiInternet()) "Conectado à internet" else "Wi-Fi sem internet", 16f, Color.WHITE, true))
+        statusCard.addView(space(3))
+        statusCard.addView(label(if (hasWifiInternet()) "Loja e aplicativos online disponíveis" else "Abra Wi-Fi para conectar e acessar a Loja", 12f, Color.rgb(245, 235, 255)))
+        statusCard.setOnClickListener { showWifiPage() }
+        body.addView(statusCard)
+        body.addView(space(22))
 
         val searchBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1068,12 +1038,16 @@ class MainActivity : Activity() {
         return item
     }
 
+    private fun approvedJxaPackages(): Set<String> =
+        prefs.getStringSet("jxa_allowed_packages", emptySet()).orEmpty().toSet()
+
     private fun loadLaunchableApps(): List<ResolveInfo> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val allowed = approvedJxaPackages()
+        if (allowed.isEmpty()) return emptyList()
         return try {
             packageManager.queryIntentActivities(intent, 0)
-                .filter { it.activityInfo.packageName != packageName }
-                .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
+                .filter { it.activityInfo.packageName in allowed && it.activityInfo.packageName != packageName }
                 .distinctBy { it.activityInfo.packageName }
                 .sortedBy { it.loadLabel(packageManager).toString().lowercase(Locale.getDefault()) }
         } catch (_: Exception) {
@@ -1125,6 +1099,10 @@ class MainActivity : Activity() {
     }
 
     private fun launchApp(packageNameToOpen: String) {
+        if (packageNameToOpen !in approvedJxaPackages()) {
+            toast("Este aplicativo não está autorizado pela Loja JeaxLabs.")
+            return
+        }
         val intent = packageManager.getLaunchIntentForPackage(packageNameToOpen)
         if (intent == null) {
             toast("Este aplicativo não pode ser aberto.")
@@ -1134,9 +1112,7 @@ class MainActivity : Activity() {
         prefs.edit().putString("recent_packages", (listOf(packageNameToOpen) + saved).take(8).joinToString("\n")).apply()
         if (dpm.isDeviceOwnerApp(packageName)) {
             try {
-                val allowed = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-                    .filter { (it.activityInfo.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 }
-                    .map { it.activityInfo.packageName } + packageName
+                val allowed = approvedJxaPackages() + packageName
                 dpm.setLockTaskPackages(adminComponent, allowed.distinct().toTypedArray())
             } catch (_: Exception) {}
         }
@@ -2188,36 +2164,22 @@ class MainActivity : Activity() {
     }
 
     private fun promptForJxaInstall(packageUrl: String, suggestedName: String) {
-        if (prefs.getString("jxa_trusted_fingerprint", "").isNullOrBlank()) {
-            AlertDialog.Builder(this)
-                .setTitle("Configurar segurança JXA")
-                .setMessage("Antes de instalar, configure o fingerprint SHA-256 confiável do publicador. Ele precisa ser obtido fora do próprio pacote.")
-                .setPositiveButton("Configurar") { _, _ -> showJxaFingerprintDialog() }
-                .setNeutralButton("Abrir gerenciador") { _, _ -> showJxaPackagesPage() }
-                .setNegativeButton("Cancelar", null)
-                .show()
+        if (!packageUrl.startsWith("https://", true) || !packageUrl.substringBefore("?").substringBefore("#").endsWith(".jxa", true)) {
+            toast("Arquivo de aplicativo inválido.")
             return
         }
-        val input = EditText(this).apply {
-            hint = "Senha de criptografia do pacote"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-        }
         AlertDialog.Builder(this)
-            .setTitle("Instalar " + suggestedName)
-            .setMessage("O pacote será baixado, a assinatura verificada e o APK descriptografado apenas se o fingerprint confiável corresponder.")
-            .setView(input)
-            .setPositiveButton("Verificar e instalar") { _, _ ->
-                val password = input.text.toString()
-                if (password.isBlank()) toast("Digite a senha do pacote .jxa.")
-                else installJxaFromUrl(packageUrl, password)
+            .setTitle("Instalar $suggestedName")
+            .setMessage("O aplicativo será baixado, autenticado e instalado.")
+            .setPositiveButton("Instalar") { _, _ ->
+                installJxaFromUrl(packageUrl)
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun installJxaFromUrl(packageUrl: String, packagePassword: String) {
-        installSecurePackageFromUrl(packageUrl, packagePassword, "JXA")
+    private fun installJxaFromUrl(packageUrl: String) {
+        installSecurePackageFromUrl(packageUrl, JxaPackageCrypto.DEFAULT_JXA_PASSWORD, "JXA")
     }
 
     private fun promptForJxuUrl() {
@@ -2275,9 +2237,13 @@ class MainActivity : Activity() {
     private fun installSecurePackageFromUrl(packageUrl: String, packagePassword: String, format: String) {
         val normalizedFormat = format.uppercase(Locale.ROOT)
         val extension = if (normalizedFormat == "JXU") ".jxu" else ".jxa"
-        val trustedFingerprint = prefs.getString("jxa_trusted_fingerprint", "").orEmpty()
+        val trustedFingerprint = if (normalizedFormat == "JXA") {
+            JxaPackageCrypto.JXA_TRUSTED_PUBLISHER_FINGERPRINT
+        } else {
+            prefs.getString("jxa_trusted_fingerprint", "").orEmpty()
+        }
         if (trustedFingerprint.isBlank()) {
-            toast("Configure o fingerprint confiável do publicador antes de instalar.")
+            toast("O certificado do publicador ainda não foi configurado.")
             return
         }
         if (!packageUrl.startsWith("https://", true)) {
@@ -2287,10 +2253,11 @@ class MainActivity : Activity() {
         toast("Baixando e validando o pacote $extension…")
         thread {
             try {
+                val effectivePassword = if (normalizedFormat == "JXA") JxaPackageCrypto.DEFAULT_JXA_PASSWORD else packagePassword
                 val verified = JxaPackageCrypto.downloadAndDecrypt(
                     this@MainActivity,
                     packageUrl,
-                    packagePassword,
+                    effectivePassword,
                     trustedFingerprint,
                     normalizedFormat
                 )

@@ -2,6 +2,19 @@
 
 Notas de versões numeradas e publicadas. Descrever apenas recursos incluídos e verificações realmente feitas.
 
+## [1.5.0] - 2026-10-22
+
+- Interface atualizada com barra de navegação própria e transições animadas.
+- Atalhos da tela inicial para Loja JeaxLabs, aplicativos, Wi-Fi e configurações.
+- Catálogo configurado para ler apenas pacotes .jxa no diretório packages/ do repositório público de atualizações.
+- Busca de redes Wi-Fi próximas; consulta de atualizações bloqueada até existir Wi-Fi com internet validada.
+- Tela de manutenção e navegação para aplicativos recentes.
+- Compilação automatizada e validação física no tablet ainda pendentes após estas alterações.
+
+# Changelog — JeaxLabs OS
+
+Notas de versões numeradas e publicadas. Descrever apenas recursos incluídos e verificações realmente feitas.
+
 ## [1.4.1] - 2026-10-22
 
 - Integrado ao APK o importador de pacotes `.jxa` por HTTPS, com validação de fingerprint Ed25519, assinatura, SHA-256 e senha AES-256-GCM.

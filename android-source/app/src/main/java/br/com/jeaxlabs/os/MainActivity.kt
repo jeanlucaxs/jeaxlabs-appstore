@@ -2178,7 +2178,7 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun installJxaFromUrl(packageUrl: String) {
+    private fun installJxaFromUrl(packageUrl: String, packagePassword: String = JxaPackageCrypto.DEFAULT_JXA_PASSWORD) {
         installSecurePackageFromUrl(packageUrl, JxaPackageCrypto.DEFAULT_JXA_PASSWORD, "JXA")
     }
 
@@ -2402,7 +2402,7 @@ class MainActivity : Activity() {
                         val galleryScroll = HorizontalScrollView(this).apply {
                             isHorizontalScrollBarEnabled = false
                             visibility = View.GONE
-                            addView(gallery, HorizontalScrollView.LayoutParams(-2, dp(126)))
+                            addView(gallery, LinearLayout.LayoutParams(-2, dp(126)))
                         }
                         for (imageIndex in 0 until imageUrls.length()) {
                             val imageUrl = imageUrls.optString(imageIndex)

@@ -2,47 +2,46 @@
 
 ## Regra do projeto
 
-Toda versão numerada publicada do JeaxLabs OS é uma versão oficial. Não publicar versões de produto com nomes como beta, preview, experimental ou release candidate. Builds usados para validar commits no GitHub Actions são apenas artefatos internos de CI e não são versões distribuídas do produto.
+Toda versão numerada publicada do JeaxLabs OS é uma versão oficial. Builds de CI são artefatos de validação, não versões distribuídas.
 
 ## Fonte única da versão
 
-O arquivo `android-source/version.properties` é a fonte da versão Android:
-- `VERSION_NAME`: versão SemVer, por exemplo `1.4.1`.
-- `VERSION_CODE`: inteiro Android estritamente maior que o de toda versão já distribuída.
+`android-source/version.properties` define a versão Android:
+- `VERSION_NAME`: versão SemVer, por exemplo `1.6.0`.
+- `VERSION_CODE`: inteiro Android maior que o de toda versão já distribuída.
 
-Ao preparar uma nova versão, atualizar no mesmo commit `android-source/version.properties`, o campo `release` de `catalog.json` e uma entrada com notas em `CHANGELOG.md`. A tag oficial deve corresponder exatamente ao nome, no formato `v<VERSION_NAME>`.
+Ao preparar uma versão, atualizar também o campo `release` em `catalog.json` e adicionar notas reais no `CHANGELOG.md`. A tag oficial deve corresponder exatamente ao nome, no formato `v<VERSION_NAME>`.
 
 ## Publicação oficial
 
-A publicação oficial é feita pela workflow `.github/workflows/official-release.yml` ao enviar a tag correspondente. Ela:
-1. Confere a tag, a versão, o catálogo e o changelog.
-2. Exige a chave permanente de assinatura Android armazenada em GitHub Actions Secrets.
-3. Compila e testa o build de release, verifica a assinatura e calcula SHA-256.
-4. Publica o APK assinado, o código-fonte e os utilitários Python em uma GitHub Release.
-5. Cria um `.jxu` cifrado que contém a APK da mesma versão, publica ambos os arquivos e aciona o manifesto apontando para o `.jxu` no repositório `jeaxlabs-os-updates`.
+A workflow `.github/workflows/official-release.yml`:
+1. Confere tag, versão, catálogo e changelog.
+2. Exige a chave permanente de assinatura Android guardada em GitHub Actions Secrets.
+3. Compila o APK, executa os testes automatizados e verifica sua assinatura.
+4. Publica APK, checksums, código Android e notas de release.
+5. Gera o pacote de atualização `.jxu` no runner da release e sincroniza o manifesto em `jeaxlabs-os-updates`.
 
-Não criar uma nova chave de assinatura para cada versão. Guardar uma cópia de segurança segura do keystore e manter sua senha fora do repositório.
+Não crie uma chave Android diferente a cada release. Guarde cópias de segurança do keystore e suas senhas fora do repositório.
 
-## Secrets necessários no repositório principal
+## Secrets necessários
 
-Configurar em **Settings → Secrets and variables → Actions**:
-- `ANDROID_KEYSTORE_BASE64`: keystore de produção convertido para Base64.
-- `ANDROID_KEYSTORE_PASSWORD`: senha do keystore.
-- `ANDROID_KEY_ALIAS`: alias da chave.
-- `ANDROID_KEY_PASSWORD`: senha da chave.
-- `UPDATES_REPO_TOKEN`: token com acesso de escrita ao repositório `jeaxlabs-os-updates`, usado apenas para disparar a sincronização do manifesto.
-- `JXU_PUBLISHER_KEY_BASE64`: arquivo PEM da chave privada Ed25519 do publicador convertido para Base64. Use a mesma chave que será confiada nos pacotes `.jxa` e `.jxu`.
-- `JXU_PUBLISHER_KEY_PASSWORD`: senha que protege essa chave privada PEM.
-- `JXU_PACKAGE_PASSWORD`: senha usada para criptografar o conteúdo dos pacotes de atualização `.jxu`.
+Configure em **Settings → Secrets and variables → Actions**:
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+- `UPDATES_REPO_TOKEN`
+- `JXU_PUBLISHER_KEY_BASE64`
+- `JXU_PUBLISHER_KEY_PASSWORD`
+- `JXU_PACKAGE_PASSWORD`
 
-A keystore deve ser criada e armazenada de forma segura antes da primeira publicação oficial assinada. Sem esses secrets, o workflow bloqueia a publicação em vez de marcar um APK debug como oficial.
+Nenhuma chave privada deve ser commitada no GitHub. O gerador interno de aplicações JXA é distribuído separadamente à equipe de TI e não pertence aos artefatos públicos. O workflow não inclui utilitários Python nos arquivos publicados.
 
 ## Requisitos para cada versão
 
-- Aumentar `VERSION_CODE`; nunca reutilizar um código de versão já distribuído.
-- Escrever notas reais no changelog; não declarar testes físicos que não foram realizados.
-- Publicar APK assinado, SHA-256, fonte e as duas ferramentas Python.
-- Manter os metadados de atualização sincronizados.
-- Distinguir claramente um build de CI de uma versão oficial distribuída.
+- Aumentar `VERSION_CODE`; nunca reutilizar um código já distribuído.
+- Escrever notas reais no changelog e não declarar testes físicos que não foram feitos.
+- Publicar o APK assinado, checksums, código-fonte e notas.
+- Manter o manifesto de atualizações sincronizado.
 
-O JeaxLabs OS atual continua sendo um aplicativo/launcher sobre Android. A publicação como versão oficial do aplicativo não significa que seja firmware/ROM nem substitui a validação em um dispositivo físico.
+O JeaxLabs OS continua sendo um launcher sobre Android. Uma release oficial do aplicativo não é uma ROM/firmware e não substitui teste no dispositivo físico.

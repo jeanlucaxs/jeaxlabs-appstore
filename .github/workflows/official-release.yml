@@ -150,7 +150,7 @@ jobs:
               a = parser.parse_args()
               if not a.apk.is_file() or a.apk.suffix.lower() != ".apk":
                   raise ValueError("O arquivo precisa ser um APK.")
-              if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", a.version) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", a.minimum_version):
+              if not re.fullmatch(r"\d+\.\d+\.\d+", a.version) or not re.fullmatch(r"\d+\.\d+\.\d+", a.minimum_version):
                   raise ValueError("Versões precisam estar no formato X.Y.Z.")
               if a.version_code < 1:
                   raise ValueError("versionCode inválido.")

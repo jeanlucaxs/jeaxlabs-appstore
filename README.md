@@ -1,32 +1,37 @@
 # JeaxLabs OS e App Store
 
-Este repositório contém o aplicativo JeaxLabs OS, o catálogo da loja e a automação de compilação/publicação. A versão Android única é definida por `android-source/version.properties`.
+Este repositório contém o APK do JeaxLabs OS, o catálogo de aplicativos e as automações de build e release. A versão Android é definida em `android-source/version.properties`.
+
+## Publicação de aplicativos na Store
+
+Cada app fica em uma pasta dentro de `packages/`:
+
+```text
+packages/
+  identificador-do-app/
+    app.json
+    app.jxa
+    01.png
+    02.png
+    ...
+    25.png
+```
+
+O `app.json` tem o título, descrição, versão, desenvolvedor, categoria e o nome do pacote JXA. As imagens PNG são opcionais e a Store mostra apenas as que existem e podem ser carregadas. Veja o [modelo de publicação](packages/README.md).
+
+O gerador interno **JeaxLabs JXA Studio** é distribuído separadamente à equipe de TI e não é armazenado nesta árvore pública. Não coloque chaves privadas, senhas ou ferramentas internas de assinatura neste repositório. O repositório precisa continuar público para que os tablets possam consultar o catálogo sem credenciais embutidas no APK.
 
 ## Política de versões
 
-Toda versão numerada distribuída do JeaxLabs OS deve ser oficial: sem publicações beta, preview ou release candidate. Artefatos de CI podem ser gerados para validação, mas são identificados como CI e não contam como versões distribuídas.
+Toda versão numerada distribuída deve ser oficial. Artefatos de CI servem apenas para validação e não contam como lançamento.
 
 - Política completa: [RELEASE_POLICY.md](RELEASE_POLICY.md)
 - Histórico de alterações: [CHANGELOG.md](CHANGELOG.md)
 - Versão e versionCode: [version.properties](android-source/version.properties)
-- Catálogo público: [catalog.json](catalog.json)
+- Metadados da release: [catalog.json](catalog.json)
 
-## Como uma versão oficial é publicada
+Para publicar uma versão oficial, aumente a versão e o versionCode, atualize o changelog e o catálogo de release, configure os GitHub Actions Secrets e envie uma tag `vX.Y.Z` igual à versão central. A workflow valida, compila, assina e publica os artefatos.
 
-1. Atualize `VERSION_NAME` e aumente `VERSION_CODE` em `version.properties`.
-2. Atualize `catalog.json` e adicione notas reais para a versão em `CHANGELOG.md`.
-3. Configure os secrets descritos em `RELEASE_POLICY.md`, inclusive a chave de assinatura Android persistente.
-4. Faça commit dessas alterações e envie uma tag `vX.Y.Z` que corresponda exatamente a `VERSION_NAME`.
-5. A workflow `Official Release` valida, compila, assina, verifica a APK, publica os artefatos na página Releases e sincroniza o manifesto do repositório `jeaxlabs-os-updates`.
+## Limites técnicos
 
-Se os requisitos de assinatura ou de metadados não forem cumpridos, a publicação oficial é bloqueada. Não se deve chamar uma APK debug de lançamento oficial.
-
-## Loja e pacotes
-
-- `tools/JeaxLabsAppPacker.py`: cria pacotes `.jxa`.
-- O empacotador de atualizações `tools/JeaxLabsUpdatePacker.py` fica no repositório `jeaxlabs-os-updates` e é incluído nos pacotes de build.
-- `catalog.json`: catálogo de aplicativos publicados; o catálogo permanece vazio até que pacotes reais sejam integrados.
-
-## Limites técnicos conhecidos
-
-O APK oferece uma experiência de launcher/kiosk sobre Android, não uma ROM independente. A importação de `.jxa` valida fingerprint, assinatura, integridade e senha antes de encaminhar o aplicativo ao instalador Android. O fluxo `.jxu` verifica uma atualização criptografada que contém o próprio APK do JeaxLabs OS e solicita a substituição da versão instalada. O Android pode exigir confirmação, e a substituição só funciona se o APK novo mantiver o mesmo certificado de assinatura Android e tiver versionCode maior. O comportamento de kiosk, bloqueio e políticas Device Owner precisa ser validado em dispositivo físico antes de declarar essa validação concluída.
+O JeaxLabs OS atual é um aplicativo launcher/kiosk executado sobre Android, não uma ROM/firmware independente. Ele pode mostrar sua tela de abertura depois que a Activity inicia, mas não substitui a animação nativa anterior ao início do Android. O botão físico de energia é controlado pelo sistema; o APK pode reagir ao retorno da tela quando continua ativo, mas não pode interceptar globalmente esse botão como uma ROM. Bloqueio gerenciado e instalação sem confirmação dependem do que Android e o firmware permitem. A validação final deve ser feita no tablet físico.

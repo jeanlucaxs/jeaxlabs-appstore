@@ -1,33 +1,34 @@
 # Changelog — JeaxLabs OS
 
-Notas de versões numeradas e publicadas. Descrever apenas recursos incluídos e verificações realmente feitas.
+Notas de versões numeradas. As validações físicas precisam ser executadas no tablet antes de declarar a versão totalmente testada.
+
+## [1.6.0] - 2026-10-23
+
+- Tela de abertura preta, com logo centralizada por aproximadamente 15 segundos e sem indicador de contagem.
+- Assistente inicial exige Wi-Fi com acesso à internet antes de concluir a configuração.
+- Barra de navegação própria com recentes, início e voltar, com transições.
+- Lista de aplicativos limitada àqueles instalados por pacotes JXA autorizados.
+- Loja lê uma pasta por aplicativo, com app.json, pacote JXA e até 25 PNGs opcionais.
+- Loja exibe título, descrição, versão, desenvolvedor e categoria, e não mostra placeholders para imagens ausentes.
+- Instalação JXA não pede senha por aplicativo; o publicador é conferido por um certificado interno.
+- Ferramentas Python de empacotamento removidas da árvore atual e dos artefatos públicos de build.
+- CI e teste no tablet físico ainda precisam ser verificados para esta versão.
 
 ## [1.5.0] - 2026-10-22
 
 - Interface atualizada com barra de navegação própria e transições animadas.
 - Atalhos da tela inicial para Loja JeaxLabs, aplicativos, Wi-Fi e configurações.
-- Catálogo configurado para ler apenas pacotes .jxa no diretório packages/ do repositório público de atualizações.
+- Catálogo configurado para ler pacotes .jxa no repositório público.
 - Busca de redes Wi-Fi próximas; consulta de atualizações bloqueada até existir Wi-Fi com internet validada.
 - Tela de manutenção e navegação para aplicativos recentes.
-- Compilação automatizada e validação física no tablet ainda pendentes após estas alterações.
-
-# Changelog — JeaxLabs OS
-
-Notas de versões numeradas e publicadas. Descrever apenas recursos incluídos e verificações realmente feitas.
 
 ## [1.4.1] - 2026-10-22
 
-- Integrado ao APK o importador de pacotes `.jxa` por HTTPS, com validação de fingerprint Ed25519, assinatura, SHA-256 e senha AES-256-GCM.
-- Integrado o formato `.jxu` para atualização do próprio JeaxLabs OS: o pacote contém o novo APK cifrado, a versão, o versionCode, a versão mínima exigida e as notas da atualização.
-- A atualização só é encaminhada ao PackageInstaller depois da verificação criptográfica e da confirmação de que o APK é o pacote `br.com.jeaxlabs.os`, com a versão e o versionCode declarados.
-- O Android pode exigir confirmação; a substituição só funciona se o APK novo tiver o mesmo certificado de assinatura da instalação atual e um versionCode maior.
-- O workflow de release foi preparado para publicar o APK e seu `.jxu`, além de sincronizar o manifesto de atualizações. A compilação final e a instalação no tablet físico ainda precisam ser confirmadas.
-
+- Integrado ao APK o importador de pacotes .jxa por HTTPS, com validação de fingerprint Ed25519, assinatura, SHA-256 e AES-GCM.
+- Integrado o formato .jxu para atualização do próprio JeaxLabs OS.
+- Atualizações verificadas são encaminhadas ao instalador Android; o sistema pode exigir confirmação.
 
 ## [1.4.0] - 2026-10-22
 
-- Consolidada a experiência de launcher/kiosk em uma única Activity, com telas internas de início, bloqueio simulado e configurações.
-- Incluídos fluxos internos de configuração e diagnóstico, com políticas avançadas condicionadas ao provisionamento Device Owner.
-- Empacotadores Python da loja (.jxa) e de atualizações (.jxu) incluídos nos artefatos de código-fonte.
-- Limite conhecido: o pacote .jxa/.jxu ainda não é instalado ou atualizado pelo APK, e o comportamento kiosk precisa de validação no tablet físico.
-
+- Consolidada a experiência de launcher/kiosk em uma única Activity.
+- Incluídos fluxos internos de configuração, diagnóstico e Task Locker.

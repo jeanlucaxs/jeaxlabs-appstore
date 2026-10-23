@@ -470,8 +470,8 @@ class MainActivity : Activity() {
     private fun logoOrMark(width: Int, height: Int): View {
         val logoId = resources.getIdentifier("jeaxlabs_logo", "drawable", packageName)
         val frame = FrameLayout(this).apply {
-            background = rounded(Color.WHITE, 18)
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(0, 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(dp(width), dp(height))
         }
         if (logoId != 0) {
@@ -559,14 +559,12 @@ class MainActivity : Activity() {
         body.addView(brandMark(48))
         body.addView(space(20))
         body.addView(label("Vamos preparar\ntudo para você.", 30f, ink, true))
-        body.addView(label("O modo completo entra em vigor depois que o PC provisionar o JeaxLabs OS como Device Owner. As permissões runtime são solicitadas pelo próprio Android.", 14f, muted))
+        body.addView(label("Conecte-se ao Wi-Fi para acessar a Loja JeaxLabs e consultar atualizações.", 14f, muted))
         body.addView(space(18))
         body.addView(rowButton("⌁", "Wi-Fi", "Conectar a uma rede dentro do JeaxLabs OS", { showWifiPage() }))
         body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios sem abrir Configurações", { showBluetoothPage() }))
         body.addView(rowButton("♧", "Notificações", "Ver avisos já autorizados", { showNotificationsPage() }))
-        body.addView(rowButton("⌘", "Device Owner", if (dpm.isDeviceOwnerApp(packageName)) "Provisionado — ativação automática" else "Necessário para Lock Task e políticas", { showDeviceOwnerHelp() }))
-        body.addView(button("Solicitar permissões do primeiro boot", { requestInitialPermissions() }, lavender, purple))
-        body.addView(button("Copiar comando de provisionamento para PC", { showDeviceOwnerHelp() }, lavender, purple))
+        body.addView(button("Preparar permissões", { requestInitialPermissions() }, lavender, purple))
         body.addView(space(7))
         body.addView(button("Concluir configuração", {
             prefs.edit().putBoolean("setup_done", true).apply()
@@ -642,8 +640,7 @@ class MainActivity : Activity() {
         }
         weatherInfo.addView(label("Clima local", 25f, Color.WHITE))
         val city = prefs.getString("weather_city", "")?.trim().orEmpty()
-        weatherInfo.addView(label(if (city.isBlank()) "Toque para configurar sua cidade" else "$city · demonstração", 14f, Color.rgb(245, 235, 255)))
-        weatherInfo.addView(label(if (city.isBlank()) "Personalize este widget" else "Previsão real será conectada na próxima etapa", 11f, Color.rgb(230, 219, 246)))
+        weatherInfo.addView(label(if (city.isBlank()) "Seu espaço pessoal" else city, 14f, Color.rgb(245, 235, 255)))
         weather.addView(weatherInfo)
         weather.addView(label("›", 27f, Color.WHITE))
         body.addView(weather)
@@ -900,10 +897,6 @@ class MainActivity : Activity() {
             sessionUnlocked = true
             showHome()
         }, Color.argb(235, 255, 255, 255), purpleDark, 55, 24))
-        root.addView(label("Simulação de tela de bloqueio", 11f, Color.rgb(234, 224, 250)).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, 0)
-        })
         var startY = 0f
         root.setOnTouchListener { _, event ->
             when (event.action) {
@@ -1547,9 +1540,9 @@ class MainActivity : Activity() {
         val pair = pageScroll()
         val body = pair.second
         body.addView(pageHeader("Aplicativos instalados", "Lista interna do JeaxLabs OS"))
-        body.addView(label(cachedApps.size.toString() + " aplicativos com atalho disponíveis", 13f, muted))
+        body.addView(label(cachedApps.size.toString() + " aplicativos disponíveis", 13f, muted))
         addAppGrid(body, cachedApps, 4)
-        body.addView(label("Tocar num ícone abre a ficha simulada do aplicativo dentro do JeaxLabs OS; nenhum APK externo será iniciado.", 12f, muted))
+        body.addView(label("Selecione um aplicativo para abrir.", 12f, muted))
         body.addView(button("Voltar", { showSettingsPage() }, lavender, purple))
         setContentView(pair.first)
     }
@@ -1638,8 +1631,8 @@ class MainActivity : Activity() {
         hero.addView(space(12))
         hero.addView(label(appName, 22f, ink, true))
         hero.addView(label(packageNameToOpen, 11f, muted))
-        hero.addView(label("Simulação de lançamento", 13f, purple, true))
-        hero.addView(label("Este launcher não inicia aplicativos externos. Para executar um app de verdade ele precisa ser integrado ou liberado em uma versão futura.", 13f, muted))
+        hero.addView(label("Aplicativo instalado", 13f, purple, true))
+        hero.addView(button("Abrir aplicativo", { launchApp(packageNameToOpen) }, purple, Color.WHITE))
         body.addView(hero)
         body.addView(button("Voltar aos aplicativos", { showAppsPage() }, lavender, purple))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
@@ -1721,23 +1714,17 @@ class MainActivity : Activity() {
         activePage = "settings"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("Configurações JeaxLabs", "Controles integrados do sistema"))
+        body.addView(pageHeader("Configurações", "Personalize seu espaço"))
         body.addView(rowButton("⌁", "Wi-Fi e internet", "Conectar, salvar e controlar redes", { showWifiPage() }))
         body.addView(rowButton("ᛒ", "Bluetooth", "Parear acessórios e controlar o rádio", { showBluetoothPage() }))
         body.addView(rowButton("☼", "Tela e aparência", "Brilho, suspensão e rotação", { showDisplaySettingsPage() }))
         body.addView(rowButton("♫", "Som e vibração", "Volumes de mídia, toque e alarme", { showSoundSettingsPage() }))
         body.addView(rowButton("▤", "Bateria e energia", getBatteryDescription(), { showBatteryPage() }))
         body.addView(rowButton("♧", "Notificações", "Central interna de avisos", { showNotificationsPage() }))
-        body.addView(rowButton("▣", "Aplicativos instalados", "Grade e fichas simuladas", { showAppsManagementPage() }))
-        body.addView(rowButton("🔐", "Pacotes .jxa", "Validar assinatura, descriptografar e instalar", { showJxaPackagesPage() }))
-        body.addView(rowButton("▰", "Armazenamento", "Uso de armazenamento", { showStoragePage() }))
-        body.addView(rowButton("◇", "Segurança e bloqueio", "Device Owner, keyguard e Task Lock", { showSecurityPage() }))
-        body.addView(rowButton("⌘", "Opções de desenvolvimento", "Status ADB e permissões", { showDeveloperPage() }))
-        body.addView(rowButton("▧", "Tela de bloqueio JeaxLabs", "Prévia interna", { showLockScreen() }))
-        body.addView(rowButton("↻", "Reiniciar interface", "Reproduzir o boot JeaxLabs", {
-            sessionUnlocked = false
-            showStartup()
-        }))
+        body.addView(rowButton("▦", "Loja JeaxLabs", "Aplicativos do catálogo oficial", { showStorePage() }))
+        body.addView(rowButton("▣", "Aplicativos instalados", "Gerenciar seus aplicativos", { showAppsManagementPage() }))
+        body.addView(rowButton("▰", "Armazenamento", "Espaço usado e disponível", { showStoragePage() }))
+        body.addView(rowButton("↻", "Atualizações", "Consultar a versão mais recente", { showUpdatesPage() }))
         body.addView(rowButton("ⓘ", "Sobre o JeaxLabs OS", "Build, dispositivo e modo gerenciado", { showAboutPage() }))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)
@@ -1895,7 +1882,7 @@ class MainActivity : Activity() {
         activePage = "jxa_packages"
         val pair = pageScroll()
         val body = pair.second
-        body.addView(pageHeader("Pacotes .jxa", "Verificação criptográfica e instalação"))
+        body.addView(pageHeader("Loja JeaxLabs", "Aplicativos verificados"))
 
         val securityCard = card(purpleDark, 18, 22)
         securityCard.addView(label("JEAXLABS PACKAGE SECURITY", 10f, Color.rgb(222, 211, 255), true))
@@ -2195,8 +2182,7 @@ class MainActivity : Activity() {
                             state.addView(appCard)
                         }
                     }
-                    state.addView(label("Pacotes .jxa compatíveis são verificados com fingerprint confiável, assinatura Ed25519, SHA-256 e senha AES-256-GCM antes da instalação.", 11f, muted))
-                    state.addView(button("Gerenciar pacotes .jxa", { showJxaPackagesPage() }, lavender, purple, 43, 13))
+                    state.addView(label("Os detalhes do aplicativo são conferidos a partir do APK contido no pacote antes da instalação.", 11f, muted))
                 }
             }
         }
@@ -2314,14 +2300,12 @@ class MainActivity : Activity() {
         hero.addView(label("Versão de interface " + currentVersionName(), 13f, Color.rgb(230, 222, 255)))
         body.addView(hero)
         body.addView(rowButton("▣", "Dispositivo", Build.MANUFACTURER + " " + Build.MODEL, { }))
-        body.addView(rowButton("▤", "Android", "Versão " + Build.VERSION.RELEASE + " · SDK " + Build.VERSION.SDK_INT, { }))
-        body.addView(rowButton("✓", "Device Owner", if (dpm.isDeviceOwnerApp(packageName)) "Ativo" else "Não configurado", { showTaskLockerPage() }, if (dpm.isDeviceOwnerApp(packageName)) teal else muted))
         body.addView(rowButton("⌘", "Identificador do pacote", packageName, {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("package", packageName))
             toast("Identificador copiado.")
         }))
-        body.addView(label("O JeaxLabs OS atual é uma interface Android com funções de launcher e Task Locker. Ele não substitui o firmware/ROM, a animação nativa de boot, os componentes privilegiados da One UI nem o sistema de recuperação.", 12f, muted))
+
         body.addView(space(12))
         body.addView(button("Voltar ao início", { showHome() }, lavender, purple))
         setContentView(pair.first)

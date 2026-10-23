@@ -4,13 +4,11 @@ on:
     branches: [main]
     paths:
       - 'android-source/**'
-      - 'tools/JeaxLabsAppPacker.py'
       - 'android-source/version.properties'
       - '.github/workflows/android-build.yml'
   pull_request:
     paths:
       - 'android-source/**'
-      - 'tools/JeaxLabsAppPacker.py'
       - 'android-source/version.properties'
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
@@ -48,29 +46,17 @@ jobs:
         run: |
           mkdir -p android-source/app/src/main/res/drawable-nodpi
           curl --fail --location --silent --show-error --max-time 30 https://www.jeaxlabs.com.br/logo-full.png -o android-source/app/src/main/res/drawable-nodpi/jeaxlabs_logo.png || echo 'Logo download failed; continuing because the current shell does not require it.'
-      - name: Check packer Python syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p packer-check
-          cp tools/JeaxLabsAppPacker.py packer-check/
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o packer-check/JeaxLabsUpdatePacker.py
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o packer-check/JeaxLabsJxuCli.py
-          python -m py_compile packer-check/JeaxLabsAppPacker.py packer-check/JeaxLabsUpdatePacker.py packer-check/JeaxLabsJxuCli.py
       - name: Compile CI APK
         working-directory: android-source
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Package CI APK, source, and tools
+      - name: Package CI APK and source
         shell: bash
         run: |
-          mkdir -p release-package/tools
+          mkdir -p release-package
           cp "android-source/app/build/outputs/apk/debug/app-debug.apk" "release-package/JeaxLabsOS-v${VERSION_NAME}-debug-CI.apk"
           cp android-source/README.md release-package/README-build.md
           cp RELEASE_POLICY.md release-package/RELEASE_POLICY.md
           cp CHANGELOG.md release-package/CHANGELOG.md
-          cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o release-package/tools/JeaxLabsJxuCli.py
           cd android-source
           zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source-CI.zip" . -x '*/build/*' '.gradle/*'
           cd ../release-package

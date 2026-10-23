@@ -1,0 +1,10 @@
+{
+  "id": "modelo-app",
+  "title": "Nome do aplicativo",
+  "description": "Descrição que aparecerá na JeaxLabs Store.",
+  "version": "1.0.0",
+  "developer": "JeaxLabs",
+  "category": "Aplicativo",
+  "package_file": "app.jxa",
+  "screenshots": []
+}

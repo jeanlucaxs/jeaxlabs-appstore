@@ -535,10 +535,12 @@ class MainActivity : Activity() {
             applySystemUiMode()
             return
         }
+        window.statusBarColor = if (activePage == "startup") Color.BLACK else if (darkSurface) Color.rgb(35, 27, 69) else background
         window.navigationBarColor = Color.BLACK
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-            (if (darkSurface) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
+        var flags = View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        if (activePage == "startup") flags = flags or View.SYSTEM_UI_FLAG_FULLSCREEN
+        if (!darkSurface) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.decorView.systemUiVisibility = flags
     }
 
     private fun logoOrMark(width: Int, height: Int): View {

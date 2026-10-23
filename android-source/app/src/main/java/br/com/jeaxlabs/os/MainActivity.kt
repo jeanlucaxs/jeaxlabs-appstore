@@ -246,10 +246,12 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         } else {
-            window.statusBarColor = background
-            window.navigationBarColor = background
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.statusBarColor = if (activePage == "startup") Color.BLACK else background
+            window.navigationBarColor = Color.BLACK
+            var flags = View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            if (activePage == "startup") flags = flags or View.SYSTEM_UI_FLAG_FULLSCREEN
+            else flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            window.decorView.systemUiVisibility = flags
         }
     }
 
@@ -631,8 +633,8 @@ class MainActivity : Activity() {
     }
 
     private fun showStartup() {
-        setBars(true)
         activePage = "startup"
+        setBars(true)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         root.addView(
             logoOrMark(236, 90),

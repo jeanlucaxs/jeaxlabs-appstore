@@ -46,6 +46,7 @@ object JxaPackageInstaller {
                     .putExtra("app_name", verified.appName)
                     .putExtra("app_version", verified.version)
                     .putExtra("package_format", verified.packageFormat)
+                    .putExtra("app_package_name", verified.appPackageName)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                     if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
                 val callback = PendingIntent.getBroadcast(context, sessionId, resultIntent, flags)

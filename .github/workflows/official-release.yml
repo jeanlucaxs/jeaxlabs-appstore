@@ -107,21 +107,90 @@ jobs:
           APK_SIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -n "$APK_SIGNER" && test -x "$APK_SIGNER"
           "$APK_SIGNER" verify --verbose "$APK_NAME"
-          mkdir -p release-package/tools
+          mkdir -p release-package
           cp "$APK_NAME" release-package/"$APK_NAME"
           cp android-source/README.md release-package/README-build.md
           cp RELEASE_POLICY.md release-package/RELEASE_POLICY.md
           cp CHANGELOG.md release-package/CHANGELOG.md
-          cp tools/JeaxLabsAppPacker.py release-package/tools/JeaxLabsAppPacker.py
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsUpdatePacker.py -o release-package/tools/JeaxLabsUpdatePacker.py
-          curl --fail --location --retry 3 --silent --show-error --max-time 30 https://raw.githubusercontent.com/jeanlucaxs/jeaxlabs-os-updates/main/tools/JeaxLabsJxuCli.py -o release-package/tools/JeaxLabsJxuCli.py
           cd android-source
           zip -qr "../release-package/JeaxLabsOS-v${VERSION_NAME}-Source.zip" . -x '*/build/*' '.gradle/*'
           cd ..
           awk -v version="$VERSION_NAME" '$0 ~ "^## \\[" version "\\]" { active=1; print; next } /^## \\[/ { if (active) exit } active { print }' CHANGELOG.md > release-package/release-notes.md
           test -s release-package/release-notes.md
           cp release-package/release-notes.md "JeaxLabsOS-v${VERSION_NAME}-Release-Notes.md"
-          python release-package/tools/JeaxLabsJxuCli.py \
+          cat > "$RUNNER_TEMP/create_jxu.py" <<'PY'
+          import argparse, hashlib, json, os, re, zipfile
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+          KDF_ROUNDS = 600_000
+          def canonical_json(value):
+              return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+          def sha256_bytes(value):
+              return hashlib.sha256(value).hexdigest()
+          def derive_key(password, salt):
+              if len(password) < 8:
+                  raise ValueError("A senha do pacote .jxu precisa ter pelo menos 8 caracteres.")
+              return PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=KDF_ROUNDS).derive(password.encode("utf-8"))
+          def main():
+              parser = argparse.ArgumentParser()
+              parser.add_argument("--apk", required=True, type=Path)
+              parser.add_argument("--output", required=True, type=Path)
+              parser.add_argument("--version", required=True)
+              parser.add_argument("--version-code", required=True, type=int)
+              parser.add_argument("--minimum-version", required=True)
+              parser.add_argument("--notes-file", required=True, type=Path)
+              parser.add_argument("--package-password", required=True)
+              parser.add_argument("--key-path", required=True, type=Path)
+              parser.add_argument("--key-password", default="")
+              a = parser.parse_args()
+              if not a.apk.is_file() or a.apk.suffix.lower() != ".apk":
+                  raise ValueError("O arquivo precisa ser um APK.")
+              if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", a.version) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", a.minimum_version):
+                  raise ValueError("Versões precisam estar no formato X.Y.Z.")
+              if a.version_code < 1:
+                  raise ValueError("versionCode inválido.")
+              with zipfile.ZipFile(a.apk) as z:
+                  if "AndroidManifest.xml" not in z.namelist():
+                      raise ValueError("O APK não contém AndroidManifest.xml.")
+              private = serialization.load_pem_private_key(a.key_path.read_bytes(), password=a.key_password.encode() if a.key_password else None)
+              if not isinstance(private, Ed25519PrivateKey):
+                  raise ValueError("A chave de assinatura deve ser Ed25519.")
+              public_pem = private.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+              public_der = private.public_key().public_bytes(encoding=serialization.Encoding.DER, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+              fingerprint = sha256_bytes(public_der)
+              salt, nonce = os.urandom(16), os.urandom(12)
+              aad = f"JeaxLabs-JXU-v1|{a.version}|{a.minimum_version}".encode("utf-8")
+              encrypted = AESGCM(derive_key(a.package_password, salt)).encrypt(nonce, a.apk.read_bytes(), aad)
+              manifest = {
+                  "format": "JXU", "format_version": 1, "product": "JeaxLabs OS",
+                  "package_type": "system-update", "target_package": "br.com.jeaxlabs.os",
+                  "version": a.version, "version_code": a.version_code,
+                  "minimum_version": a.minimum_version, "release_notes": a.notes_file.read_text(encoding="utf-8").strip(),
+                  "source_filename": a.apk.name, "payload_filename": "payload.aesgcm",
+                  "encryption": "AES-256-GCM", "kdf": "PBKDF2-HMAC-SHA256", "kdf_iterations": KDF_ROUNDS,
+                  "salt_hex": salt.hex(), "nonce_hex": nonce.hex(), "aad_utf8": aad.decode("utf-8"),
+                  "payload_sha256": sha256_bytes(encrypted), "payload_size": len(encrypted),
+                  "signature": "Ed25519", "publisher_fingerprint_sha256": fingerprint,
+                  "created_utc": datetime.now(timezone.utc).isoformat(),
+              }
+              manifest_bytes = canonical_json(manifest)
+              signature = private.sign(manifest_bytes)
+              a.output.parent.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(a.output, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                  z.writestr("manifest.json", manifest_bytes)
+                  z.writestr("payload.aesgcm", encrypted, compress_type=zipfile.ZIP_STORED)
+                  z.writestr("signature.ed25519", signature)
+                  z.writestr("publisher.pub.pem", public_pem)
+              private.public_key().verify(signature, manifest_bytes)
+          if __name__ == "__main__":
+              main()
+          PY
+          python "$RUNNER_TEMP/create_jxu.py" \
             --apk "$APK_NAME" \
             --output "$JXU_NAME" \
             --version "$VERSION_NAME" \

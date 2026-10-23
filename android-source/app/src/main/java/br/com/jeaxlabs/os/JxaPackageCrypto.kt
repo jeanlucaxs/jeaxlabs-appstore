@@ -35,10 +35,13 @@ data class VerifiedJxaPackage(
     val targetPackage: String? = null,
     val versionCode: Long = 0L,
     val minimumVersion: String = "",
-    val releaseNotes: String = ""
+    val releaseNotes: String = "",
+    val appPackageName: String = ""
 )
 
 object JxaPackageCrypto {
+    const val DEFAULT_JXA_PASSWORD = "JeaxLabsOS-Apps-AESGCM-2026-Internal"
+    const val JXA_TRUSTED_PUBLISHER_FINGERPRINT = "d22bdc39eb169ecc968a598f1ff3fed5103fd7d78cd7964bfab16796991cce79"
     private const val FORMAT_VERSION = 1
     private const val KDF_ROUNDS = 600_000
     private const val MAX_PACKAGE_BYTES = 512L * 1024L * 1024L
@@ -262,6 +265,8 @@ object JxaPackageCrypto {
                     }
                 }
                 val installedApkInfo = validateApk(context, apkFile)
+                val appPackageName = installedApkInfo.packageName.orEmpty()
+                require(appPackageName.isNotBlank()) { "O APK não informa um nome de pacote válido." }
                 if (normalizedFormat == "JXU") {
                     val parsedName = installedApkInfo.versionName ?: ""
                     val parsedCode = if (Build.VERSION.SDK_INT >= 28) installedApkInfo.longVersionCode else installedApkInfo.versionCode.toLong()
@@ -297,7 +302,8 @@ object JxaPackageCrypto {
                 targetPackage = targetPackage,
                 versionCode = declaredVersionCode,
                 minimumVersion = minimumVersion,
-                releaseNotes = releaseNotes
+                releaseNotes = releaseNotes,
+                appPackageName = appPackageName
             )
             apkFile = null
             return result

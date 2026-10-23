@@ -3,6 +3,7 @@ package br.com.jeaxlabs.os
 import android.content.pm.PackageInstaller
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
@@ -12,7 +13,16 @@ class JxaInstallStatusReceiver : BroadcastReceiver() {
         when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_SUCCESS -> {
                 val format = intent.getStringExtra("package_format") ?: "JXA"
-                Toast.makeText(context, if (format == "JXU") "Atualização do JeaxLabs OS instalada." else "Instalação do pacote .jxa concluída.", Toast.LENGTH_LONG).show()
+                if (format == "JXA") {
+                    val appPackage = intent.getStringExtra("app_package_name").orEmpty()
+                    if (appPackage.isNotBlank() && appPackage != context.packageName) {
+                        val prefs = context.getSharedPreferences("jeax_system", Context.MODE_PRIVATE)
+                        val approved = prefs.getStringSet("jxa_allowed_packages", emptySet()).orEmpty().toMutableSet()
+                        approved.add(appPackage)
+                        prefs.edit().putStringSet("jxa_allowed_packages", approved).apply()
+                    }
+                }
+                Toast.makeText(context, if (format == "JXU") "Atualização do JeaxLabs OS instalada." else "Instalação concluída.", Toast.LENGTH_LONG).show()
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirmation = if (Build.VERSION.SDK_INT >= 33) {
